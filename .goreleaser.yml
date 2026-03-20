@@ -1,10 +1,14 @@
 version: 2
 
+project_name: kagento
+
 builds:
   - main: .
     binary: kagento
     env:
       - CGO_ENABLED=0
+    flags:
+      - -trimpath
     goos:
       - linux
       - darwin
@@ -12,20 +16,56 @@ builds:
     goarch:
       - amd64
       - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
     ldflags:
       - -s -w -X github.com/kagento/kagento-cli/cmd.version={{.Version}}
 
 archives:
-  - format: tar.gz
+  - formats:
+      - tar.gz
     name_template: "kagento_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
 
 checksum:
   name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
 
 release:
   github:
     owner: kagento
     name: kagento-cli
+  mode: keep-existing
+  replace_existing_artifacts: true
+
+brews:
+  - name: kagento
+    repository:
+      owner: kagento
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: github-actions[bot]
+      email: 41898282+github-actions[bot]@users.noreply.github.com
+    commit_msg_template: "brew: update {{ .ProjectName }} to {{ .Tag }}"
+    directory: Formula
+    homepage: "https://kagento.io"
+    description: "CLI for Kagento, the competitive AI agent challenge platform"
+    license: "MIT"
+    install: |
+      bin.install "kagento"
+    test: |
+      system "#{bin}/kagento", "--version"

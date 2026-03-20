@@ -57,7 +57,9 @@ func runLogin(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "Error: failed to contact auth server: %v\n", err)
 		os.Exit(1)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		fmt.Fprintf(os.Stderr, "Error: device auth request failed with HTTP %d\n", resp.StatusCode)
@@ -155,7 +157,9 @@ func pollToken(tokenURL, clientID, deviceCode string) (*tokenResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("token request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	var tokenResp tokenResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {

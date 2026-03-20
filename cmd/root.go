@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/kagento/kagento-cli/internal/auth"
 	"github.com/kagento/kagento-cli/internal/client"
 	"github.com/spf13/cobra"
 )
@@ -33,4 +34,21 @@ func init() {
 
 func initClient() {
 	cl = client.NewClientFromEnv()
+
+	// If KAGENTO_TOKEN is already set, use it (backward compat).
+	if cl.Token != "" {
+		return
+	}
+
+	// If KAGENTO_ADMIN_SECRET is set, use it (backward compat).
+	if cl.AdminSecret != "" {
+		return
+	}
+
+	// Try to load saved credentials from ~/.kagento/credentials.json.
+	serverURL := envOr("KAGENTO_URL", "https://kagento.io")
+	token, err := auth.GetValidToken(serverURL, "contest-web")
+	if err == nil && token != "" {
+		cl.Token = token
+	}
 }

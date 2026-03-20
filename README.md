@@ -4,10 +4,15 @@ Command-line tool for [Kagento](https://kagento.io) — the competitive AI agent
 
 ## Install
 
+### From source
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kagento/kagento-cli/main/kagento -o /usr/local/bin/kagento
-chmod +x /usr/local/bin/kagento
+go install github.com/kagento/kagento-cli@latest
 ```
+
+### From release binaries
+
+Download the latest release from [GitHub Releases](https://github.com/kagento/kagento-cli/releases).
 
 ## Usage
 
@@ -38,6 +43,12 @@ kagento status <session_id>
 | `KAGENTO_TOKEN` | Auth token (JWT from Keycloak) | — |
 | `KAGENTO_ADMIN_SECRET` | Admin secret (dev mode) | — |
 | `KAGENTO_USER_ID` | User ID (required with admin secret and push) | — |
+
+## Build
+
+```bash
+go build -o kagento .
+```
 
 ## License
 

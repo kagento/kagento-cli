@@ -110,7 +110,9 @@ func GetValidToken(keycloakURL, clientID string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("refresh request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	var tokenResp struct {
 		AccessToken  string `json:"access_token"`

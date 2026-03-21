@@ -70,6 +70,18 @@ func runTaskPublish(cmd *cobra.Command, args []string) {
 	registry := cl.Registry
 	base := fmt.Sprintf("%s/public/%s/%s", registry, cl.UserID, cfg.Slug)
 
+	// Auto-login to registry using token from backend
+	fmt.Println("Authenticating with registry...")
+	token, err := cl.GetRegistryToken()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting registry token: %v\n", err)
+		os.Exit(1)
+	}
+	if err := dockerLogin(registry, cl.UserID, token); err != nil {
+		fmt.Fprintf(os.Stderr, "Error logging into registry: %v\n", err)
+		os.Exit(1)
+	}
+
 	for _, tag := range []string{"task", "test"} {
 		src := fmt.Sprintf("%s:%s", cfg.Slug, tag)
 		dst := fmt.Sprintf("%s:%s", base, tag)

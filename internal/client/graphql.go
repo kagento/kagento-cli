@@ -24,7 +24,7 @@ func NewClientFromEnv() *Client {
 	return &Client{
 		URL:         envOr("KAGENTO_API", "http://localhost:8080/v1/graphql"),
 		BackendURL:  envOr("KAGENTO_BACKEND", "http://localhost:8081"),
-		Registry:    envOr("KAGENTO_REGISTRY", "localhost:5000"),
+		Registry:    envOr("KAGENTO_REGISTRY", "registry.kagento.io"),
 		Token:       os.Getenv("KAGENTO_TOKEN"),
 		AdminSecret: os.Getenv("KAGENTO_ADMIN_SECRET"),
 		UserID:      os.Getenv("KAGENTO_USER_ID"),
@@ -93,6 +93,36 @@ func (c *Client) Query(query string, variables map[string]interface{}) (map[stri
 		return nil, fmt.Errorf("unexpected response: %s", string(respBody))
 	}
 	return data, nil
+}
+
+// GetRegistryToken fetches a short-lived registry auth token from the backend.
+func (c *Client) GetRegistryToken() (string, error) {
+	req, err := http.NewRequest("GET", c.BackendURL+"/api/registry/token", nil)
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	for k, v := range c.headers() {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("parse response: %w", err)
+	}
+	return result.Password, nil
 }
 
 // headers returns auth headers based on token or admin secret.

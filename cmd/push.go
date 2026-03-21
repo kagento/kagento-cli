@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -68,6 +69,14 @@ func runPush(cmd *cobra.Command, args []string) {
 
 func dockerRun(args ...string) error {
 	cmd := exec.Command("docker", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func dockerLogin(registry, username, password string) error {
+	cmd := exec.Command("docker", "login", registry, "-u", username, "--password-stdin")
+	cmd.Stdin = strings.NewReader(password)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()

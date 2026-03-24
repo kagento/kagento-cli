@@ -111,19 +111,18 @@ func loadAndValidateTask(dir string) (*TaskConfig, error) {
 		errs = append(errs, "time_limit_sec must be non-negative")
 	}
 
-	// Check required files based on environment type.
+	// Environment-specific validation.
 	if cfg.EnvironmentType == "vcluster" {
-		// vcluster tasks need provision manifests and checks in task.yaml.
-		if _, err := os.Stat(filepath.Join(dir, "provision/manifests")); os.IsNotExist(err) {
-			errs = append(errs, "missing required directory: provision/manifests")
-		}
+		errs = append(errs, validateVclusterTask(dir, &cfg)...)
 	} else {
-		// Container tasks need Dockerfiles.
+		// Container tasks: check Dockerfiles exist.
 		for _, f := range []string{"user/Dockerfile", "test/Dockerfile"} {
 			if _, err := os.Stat(filepath.Join(dir, f)); os.IsNotExist(err) {
 				errs = append(errs, fmt.Sprintf("missing required file: %s", f))
 			}
 		}
+		// Validate Dockerfile content.
+		errs = append(errs, validateContainerTask(dir)...)
 	}
 
 	if len(errs) > 0 {

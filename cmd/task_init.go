@@ -39,9 +39,14 @@ func runTaskInit(cmd *cobra.Command, args []string) {
 	taskYAML := fmt.Sprintf(`version: 1
 slug: %s
 title: "%s"
-short_desc: "TODO: describe your task"
+short_desc: "TODO: one-liner for task cards"
+description: |
+  ## Overview
+
+  TODO: public description shown on the task detail page.
+  Leave empty or remove if you want to keep details private until SSH.
 difficulty: medium
-container_size: small
+size: small
 time_limit_sec: 3600
 `, slug, slug)
 	writeFile(filepath.Join(dir, "task.yaml"), taskYAML)
@@ -136,7 +141,7 @@ ENTRYPOINT ["python3", "/test/run_tests.py"]
 	}
 
 	fmt.Printf("Created task scaffold at %s/\n", dir)
-	fmt.Println("  task.yaml            — task metadata (public short_desc)")
+	fmt.Println("  task.yaml            — task metadata (public short_desc + description)")
 	fmt.Println("  user/Dockerfile      — contestant container image")
 	fmt.Println("  user/TASK.md         — private task description (COPYed into image)")
 	fmt.Println("  test/Dockerfile      — test runner image")

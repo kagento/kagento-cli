@@ -11,13 +11,23 @@ import (
 
 // TaskConfig represents the task.yaml format.
 type TaskConfig struct {
-	Version       int    `yaml:"version"`
-	Slug          string `yaml:"slug"`
-	Title         string `yaml:"title"`
-	ShortDesc     string `yaml:"short_desc"`
-	Difficulty    string `yaml:"difficulty"`
-	ContainerSize string `yaml:"container_size"`
-	TimeLimitSec  int    `yaml:"time_limit_sec"`
+	Version          int                    `yaml:"version"`
+	Slug             string                 `yaml:"slug"`
+	Title            string                 `yaml:"title"`
+	ShortDesc        string                 `yaml:"short_desc"`
+	Description      string                 `yaml:"description"`
+	TaskInstructions string                 `yaml:"task_instructions"`
+	Difficulty       string                 `yaml:"difficulty"`
+	ContainerSize    string                 `yaml:"size"`
+	TimeLimitSec     int                    `yaml:"time_limit_sec"`
+	ScoringType      string                 `yaml:"scoring_type"`
+	ScoringConfig    map[string]interface{} `yaml:"scoring_config"`
+	Category         string                 `yaml:"category"`
+	EnvironmentType  string                 `yaml:"environment_type"`
+	Provision        struct {
+		Manifests []string `yaml:"manifests"`
+	} `yaml:"provision"`
+	Checks []interface{} `yaml:"checks"`
 }
 
 var validDifficulties = map[string]bool{
@@ -95,23 +105,20 @@ func loadAndValidateTask(dir string) (*TaskConfig, error) {
 		errs = append(errs, fmt.Sprintf("difficulty must be one of: easy, medium, hard, extreme (got %q)", cfg.Difficulty))
 	}
 	if cfg.ContainerSize != "" && !validContainerSizes[cfg.ContainerSize] {
-		errs = append(errs, fmt.Sprintf("container_size must be one of: nano, micro, small, medium, large (got %q)", cfg.ContainerSize))
+		errs = append(errs, fmt.Sprintf("size must be one of: nano, micro, small, medium, large (got %q)", cfg.ContainerSize))
 	}
 	if cfg.TimeLimitSec < 0 {
 		errs = append(errs, "time_limit_sec must be non-negative")
 	}
 
-	// Check required files based on state.
-	state := detectState(dir)
-	switch state {
-	case stateBuilt:
-		for _, f := range []string{"user.tar", "test.tar"} {
-			if _, err := os.Stat(filepath.Join(dir, f)); os.IsNotExist(err) {
-				errs = append(errs, fmt.Sprintf("missing required file: %s", f))
-			}
+	// Check required files based on environment type.
+	if cfg.EnvironmentType == "vcluster" {
+		// vcluster tasks need provision manifests and checks in task.yaml.
+		if _, err := os.Stat(filepath.Join(dir, "provision/manifests")); os.IsNotExist(err) {
+			errs = append(errs, "missing required directory: provision/manifests")
 		}
-	default:
-		// Raw state (or unknown): check Dockerfiles.
+	} else {
+		// Container tasks need Dockerfiles.
 		for _, f := range []string{"user/Dockerfile", "test/Dockerfile"} {
 			if _, err := os.Stat(filepath.Join(dir, f)); os.IsNotExist(err) {
 				errs = append(errs, fmt.Sprintf("missing required file: %s", f))
@@ -130,19 +137,22 @@ func loadAndValidateTask(dir string) (*TaskConfig, error) {
 	return &cfg, nil
 }
 
-func buildTaskImages(dir, slug string) error {
-	for _, spec := range []struct {
-		context string
-		tag     string
-	}{
-		{"user", slug + ":task"},
-		{"test", slug + ":test"},
-	} {
-		ctx := filepath.Join(dir, spec.context)
-		fmt.Printf("  Building %s from %s/Dockerfile...\n", spec.tag, spec.context)
-		if err := dockerRun("build", "-t", spec.tag, ctx); err != nil {
-			return fmt.Errorf("build %s failed (see docker output above): %w", spec.tag, err)
-		}
+// loadTaskConfig reads task.yaml without full validation.
+func loadTaskConfig(dir string) (*TaskConfig, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "task.yaml"))
+	if err != nil {
+		return nil, fmt.Errorf("read task.yaml: %w", err)
 	}
-	return nil
+
+	var cfg TaskConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse task.yaml: %w", err)
+	}
+
+	if cfg.Slug == "" {
+		return nil, fmt.Errorf("slug is required in task.yaml")
+	}
+
+	return &cfg, nil
 }
+

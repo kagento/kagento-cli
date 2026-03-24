@@ -46,8 +46,7 @@ func initClient() {
 	}
 
 	// Try to load saved credentials from ~/.kagento/credentials.json.
-	serverURL := envOr("KAGENTO_URL", "https://kagento.io")
-	token, err := auth.GetValidToken(serverURL, "contest-web")
+	token, err := auth.GetValidToken()
 	if err == nil && token != "" {
 		cl.Token = token
 	}

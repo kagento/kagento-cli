@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,7 +82,7 @@ func Delete() error {
 }
 
 // GetValidToken returns a valid access token, refreshing if needed.
-func GetValidToken(keycloakURL, clientID string) (string, error) {
+func GetValidToken() (string, error) {
 	creds, err := Load()
 	if err != nil {
 		return "", err
@@ -94,19 +93,28 @@ func GetValidToken(keycloakURL, clientID string) (string, error) {
 		return creds.AccessToken, nil
 	}
 
-	// Token expired — try to refresh.
+	// Token expired — try to refresh via Supabase.
 	if creds.RefreshToken == "" {
 		return "", fmt.Errorf("token expired and no refresh token available")
 	}
 
-	tokenURL := keycloakURL + "/realms/contest/protocol/openid-connect/token"
-	form := url.Values{
-		"grant_type":    {"refresh_token"},
-		"refresh_token": {creds.RefreshToken},
-		"client_id":     {clientID},
+	if creds.ServerURL == "" {
+		return "", fmt.Errorf("no server URL in credentials, please re-login")
 	}
 
-	resp, err := http.PostForm(tokenURL, form)
+	tokenURL := creds.ServerURL + "/auth/v1/token?grant_type=refresh_token"
+	reqBody, _ := json.Marshal(map[string]string{
+		"refresh_token": creds.RefreshToken,
+	})
+
+	req, err := http.NewRequest("POST", tokenURL, strings.NewReader(string(reqBody)))
+	if err != nil {
+		return "", fmt.Errorf("create refresh request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("apikey", supabaseAnonKey(creds.ServerURL))
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("refresh request failed: %w", err)
 	}
@@ -140,6 +148,13 @@ func GetValidToken(keycloakURL, clientID string) (string, error) {
 	}
 
 	return newCreds.AccessToken, nil
+}
+
+// supabaseAnonKey returns the public anon key for the Supabase project.
+// This is a public key (safe to embed) — it only grants anonymous access.
+func supabaseAnonKey(supabaseURL string) string {
+	// Default Kagento project anon key.
+	return "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJraG15YXRkd2ZheWRoY21na3RlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwODIwODMsImV4cCI6MjA4OTY1ODA4M30.DYAeIkk8Zb8gUBaSvByPKXp-xsYpL0uKfq7LOrasJks"
 }
 
 // ParseJWTClaims decodes the payload of a JWT without verification.

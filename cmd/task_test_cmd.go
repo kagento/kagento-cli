@@ -184,7 +184,7 @@ func runTaskTestWatch(dir string) {
 		currentMtime := collectMaxMtime(absDir)
 		if currentMtime.After(lastMtime) {
 			lastMtime = currentMtime
-			fmt.Println("\n--- Change detected, rebuilding and retesting ---\n")
+			fmt.Println("\n--- Change detected, rebuilding and retesting ---")
 			if err := doTaskTest(dir); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			}

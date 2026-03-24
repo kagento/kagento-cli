@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,7 +18,7 @@ import (
 
 var loginCmd = &cobra.Command{
 	Use:   "login",
-	Short: "Log in to Kagento via browser (OAuth 2.0 Device Flow)",
+	Short: "Log in to Kagento via browser (OAuth)",
 	Args:  cobra.NoArgs,
 	Run:   runLogin,
 }
@@ -25,147 +27,203 @@ func init() {
 	rootCmd.AddCommand(loginCmd)
 }
 
-type deviceAuthResponse struct {
-	DeviceCode      string `json:"device_code"`
-	UserCode        string `json:"user_code"`
-	VerificationURI string `json:"verification_uri"`
-	ExpiresIn       int    `json:"expires_in"`
-	Interval        int    `json:"interval"`
-}
-
-type tokenResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int64  `json:"expires_in"`
-	Error        string `json:"error"`
-	ErrorDesc    string `json:"error_description"`
-}
-
 func runLogin(cmd *cobra.Command, args []string) {
-	serverURL := envOr("KAGENTO_URL", "https://kagento.io")
-	clientID := "contest-web"
-	keycloakURL := serverURL
-	deviceAuthURL := keycloakURL + "/realms/contest/protocol/openid-connect/auth/device"
-	tokenURL := keycloakURL + "/realms/contest/protocol/openid-connect/token"
+	supabaseURL := envOr("SUPABASE_URL", "https://bkhmyatdwfaydhcmgkte.supabase.co")
 
-	// Step 1: Request device authorization.
-	resp, err := http.PostForm(deviceAuthURL, url.Values{
-		"client_id": {clientID},
-		"scope":     {"openid"},
-	})
+	// Find a free port for the callback server.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to contact auth server: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: could not start local server: %v\n", err)
 		os.Exit(1)
 	}
-	defer func() {
-		_ = resp.Body.Close()
+	port := listener.Addr().(*net.TCPAddr).Port
+	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", port)
+
+	// Build the Supabase OAuth URL — use GitHub as provider.
+	// Supabase manages its own state/PKCE internally.
+	authURL := fmt.Sprintf(
+		"%s/auth/v1/authorize?provider=github&redirect_to=%s",
+		supabaseURL,
+		url.QueryEscape(redirectURI),
+	)
+
+	fmt.Printf("\nOpening browser to log in...\n")
+	fmt.Printf("If the browser doesn't open, visit:\n  %s\n\n", authURL)
+
+	openBrowser(authURL)
+
+	// Start local server to capture the callback.
+	resultCh := make(chan *callbackResult, 1)
+
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/callback" {
+				http.NotFound(w, r)
+				return
+			}
+
+			// Supabase sends tokens as hash fragment, but with PKCE flow
+			// it can also send an auth code as query param.
+			code := r.URL.Query().Get("code")
+			errMsg := r.URL.Query().Get("error")
+			errDesc := r.URL.Query().Get("error_description")
+
+			if errMsg != "" {
+				w.Header().Set("Content-Type", "text/html")
+				fmt.Fprintf(w, "<html><body><h2>Login failed</h2><p>%s: %s</p><p>You can close this tab.</p></body></html>", errMsg, errDesc)
+				resultCh <- &callbackResult{err: fmt.Errorf("%s: %s", errMsg, errDesc)}
+				return
+			}
+
+			if code == "" {
+				// Supabase might send tokens in the hash fragment.
+				// Serve a page that extracts them and sends to our server.
+				w.Header().Set("Content-Type", "text/html")
+				fmt.Fprintf(w, `<html><body><script>
+const hash = window.location.hash.substring(1);
+const params = new URLSearchParams(hash);
+const access_token = params.get('access_token');
+const refresh_token = params.get('refresh_token');
+const expires_in = params.get('expires_in');
+if (access_token) {
+	fetch('/callback/token?' + new URLSearchParams({access_token, refresh_token: refresh_token || '', expires_in: expires_in || '3600'}))
+	.then(() => { document.body.innerHTML = '<h2>Logged in!</h2><p>You can close this tab.</p>'; });
+} else {
+	document.body.innerHTML = '<h2>Login failed</h2><p>No tokens received. You can close this tab.</p>';
+}
+</script><p>Processing login...</p></body></html>`)
+				return
+			}
+
+			// Exchange code for tokens.
+			tokens, err := exchangeCode(supabaseURL, code, redirectURI)
+			if err != nil {
+				w.Header().Set("Content-Type", "text/html")
+				fmt.Fprintf(w, "<html><body><h2>Login failed</h2><p>%v</p><p>You can close this tab.</p></body></html>", err)
+				resultCh <- &callbackResult{err: err}
+				return
+			}
+
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, "<html><body><h2>Logged in!</h2><p>You can close this tab.</p></body></html>")
+			resultCh <- &callbackResult{tokens: tokens}
+		}),
+	}
+
+	// Also handle the token extraction from hash fragment.
+	origHandler := srv.Handler
+	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/callback/token" {
+			accessToken := r.URL.Query().Get("access_token")
+			refreshToken := r.URL.Query().Get("refresh_token")
+			expiresIn := r.URL.Query().Get("expires_in")
+			if accessToken != "" {
+				var expIn int64 = 3600
+				fmt.Sscanf(expiresIn, "%d", &expIn)
+				resultCh <- &callbackResult{tokens: &tokenResult{
+					AccessToken:  accessToken,
+					RefreshToken: refreshToken,
+					ExpiresIn:    expIn,
+				}}
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			http.Error(w, "missing token", http.StatusBadRequest)
+			return
+		}
+		origHandler.ServeHTTP(w, r)
+	})
+
+	go func() {
+		_ = srv.Serve(listener)
 	}()
-
-	if resp.StatusCode != http.StatusOK {
-		fmt.Fprintf(os.Stderr, "Error: device auth request failed with HTTP %d\n", resp.StatusCode)
-		os.Exit(1)
-	}
-
-	var deviceResp deviceAuthResponse
-	if err := json.NewDecoder(resp.Body).Decode(&deviceResp); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to parse device auth response: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Step 2: Show instructions to user.
-	fmt.Printf("\nOpen %s and enter code: %s\n\n", deviceResp.VerificationURI, deviceResp.UserCode)
-
-	// Step 3: Try to open browser automatically.
-	openBrowser(deviceResp.VerificationURI)
 
 	fmt.Println("Waiting for login...")
 
-	// Step 4: Poll token endpoint.
-	interval := deviceResp.Interval
-	if interval < 1 {
-		interval = 5
-	}
+	// Wait for callback or timeout.
+	select {
+	case result := <-resultCh:
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
 
-	deadline := time.Now().Add(time.Duration(deviceResp.ExpiresIn) * time.Second)
-
-	for time.Now().Before(deadline) {
-		time.Sleep(time.Duration(interval) * time.Second)
-
-		tokenResp, err := pollToken(tokenURL, clientID, deviceResp.DeviceCode)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		if result.err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", result.err)
 			os.Exit(1)
 		}
 
-		switch tokenResp.Error {
-		case "":
-			// Success — save credentials.
-			creds := &auth.Credentials{
-				AccessToken:  tokenResp.AccessToken,
-				RefreshToken: tokenResp.RefreshToken,
-				ExpiresAt:    time.Now().Unix() + tokenResp.ExpiresIn,
-				ServerURL:    serverURL,
-			}
-			if err := auth.Save(creds); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: failed to save credentials: %v\n", err)
-				os.Exit(1)
-			}
-
-			// Print who we logged in as.
-			claims, err := auth.ParseJWTClaims(tokenResp.AccessToken)
-			if err == nil {
-				name := claimString(claims, "preferred_username")
-				if name == "" {
-					name = claimString(claims, "email")
-				}
-				if name != "" {
-					fmt.Printf("Logged in as %s\n", name)
-					return
-				}
-			}
-			fmt.Println("Logged in successfully!")
-			return
-
-		case "authorization_pending":
-			// Keep polling.
-			continue
-
-		case "slow_down":
-			interval += 5
-			continue
-
-		case "expired_token":
-			fmt.Fprintln(os.Stderr, "Error: login timed out. Please try again.")
-			os.Exit(1)
-
-		default:
-			fmt.Fprintf(os.Stderr, "Error: %s — %s\n", tokenResp.Error, tokenResp.ErrorDesc)
+		creds := &auth.Credentials{
+			AccessToken:  result.tokens.AccessToken,
+			RefreshToken: result.tokens.RefreshToken,
+			ExpiresAt:    time.Now().Unix() + result.tokens.ExpiresIn,
+			ServerURL:    supabaseURL,
+		}
+		if err := auth.Save(creds); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: failed to save credentials: %v\n", err)
 			os.Exit(1)
 		}
-	}
 
-	fmt.Fprintln(os.Stderr, "Error: login timed out. Please try again.")
-	os.Exit(1)
+		claims, err := auth.ParseJWTClaims(result.tokens.AccessToken)
+		if err == nil {
+			if email := claimString(claims, "email"); email != "" {
+				fmt.Printf("Logged in as %s\n", email)
+				return
+			}
+		}
+		fmt.Println("Logged in successfully!")
+
+	case <-time.After(5 * time.Minute):
+		_ = srv.Close()
+		fmt.Fprintln(os.Stderr, "Error: login timed out. Please try again.")
+		os.Exit(1)
+	}
 }
 
-func pollToken(tokenURL, clientID, deviceCode string) (*tokenResponse, error) {
-	resp, err := http.PostForm(tokenURL, url.Values{
-		"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
-		"device_code": {deviceCode},
-		"client_id":   {clientID},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("token request failed: %w", err)
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
+type callbackResult struct {
+	tokens *tokenResult
+	err    error
+}
 
-	var tokenResp tokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+type tokenResult struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresIn    int64  `json:"expires_in"`
+}
+
+func exchangeCode(supabaseURL, code, redirectURI string) (*tokenResult, error) {
+	tokenURL := supabaseURL + "/auth/v1/token?grant_type=pkce"
+
+	form := url.Values{
+		"auth_code":    {code},
+		"code_verifier": {""},
+	}
+
+	resp, err := http.PostForm(tokenURL, form)
+	if err != nil {
+		return nil, fmt.Errorf("token exchange failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int64  `json:"expires_in"`
+		Error        string `json:"error"`
+		ErrorDesc    string `json:"error_description"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("parse token response: %w", err)
 	}
-	return &tokenResp, nil
+
+	if result.Error != "" {
+		return nil, fmt.Errorf("%s: %s", result.Error, result.ErrorDesc)
+	}
+
+	return &tokenResult{
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		ExpiresIn:    result.ExpiresIn,
+	}, nil
 }
 
 func openBrowser(url string) {

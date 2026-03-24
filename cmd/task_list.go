@@ -35,7 +35,7 @@ func runTaskList(cmd *cobra.Command, args []string) {
 				slug
 				title
 				difficulty
-				container_size
+				size
 				status
 			}
 		}`, where)
@@ -70,7 +70,7 @@ func runTaskList(cmd *cobra.Command, args []string) {
 			strVal(task, "slug"),
 			strVal(task, "title"),
 			strVal(task, "difficulty"),
-			strVal(task, "container_size"),
+			strVal(task, "size"),
 			strVal(task, "status"),
 		)
 	}

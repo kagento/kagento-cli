@@ -27,9 +27,12 @@ func runSubmit(cmd *cobra.Command, args []string) {
 	// Set session status to "finishing"
 	updateMutation := `
 		mutation($id: uuid!) {
-			update_sessions_by_pk(pk_columns: {id: $id}, _set: {status: "finishing"}) {
-				id
-				status
+			update_sessions(where: {id: {_eq: $id}, status: {_in: ["ready", "running"]}}, _set: {status: "finishing"}) {
+				affected_rows
+				returning {
+					id
+					status
+				}
 			}
 		}`
 
@@ -41,13 +44,15 @@ func runSubmit(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	session, ok := data["update_sessions_by_pk"].(map[string]interface{})
-	if !ok || session == nil {
-		fmt.Fprintln(os.Stderr, "Error: session not found or could not be updated")
-		os.Exit(1)
+	result, ok := data["update_sessions"].(map[string]interface{})
+	if ok && result != nil {
+		if affected, ok := result["affected_rows"].(float64); ok && affected > 0 {
+			goto poll
+		}
 	}
 
 	// Poll until status == "completed"
+poll:
 	pollQuery := `
 		query($id: uuid!) {
 			sessions_by_pk(id: $id) {

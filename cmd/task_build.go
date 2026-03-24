@@ -17,9 +17,12 @@ const (
 
 var taskBuildCmd = &cobra.Command{
 	Use:   "build [path]",
-	Short: "Build Docker images and save as user.tar + test.tar (raw → built)",
-	Args:  cobra.MaximumNArgs(1),
-	Run:   runTaskBuild,
+	Short: "Build Docker images locally (for local testing only)",
+	Long: `Builds user and test Docker images locally. These images are used
+by 'kagento task test' and 'kagento task run' for local development.
+To submit for server-side building, use 'kagento task submit' instead.`,
+	Args: cobra.MaximumNArgs(1),
+	Run:  runTaskBuild,
 }
 
 func init() {
@@ -32,56 +35,24 @@ func runTaskBuild(cmd *cobra.Command, args []string) {
 		dir = args[0]
 	}
 
-	if err := buildToTars(dir); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-}
-
-// buildToTars validates, builds images, and saves them as tars in dir.
-func buildToTars(dir string) error {
 	cfg, err := loadAndValidateTask(dir)
 	if err != nil {
-		return err
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
 
 	fmt.Println("Building images...")
 	if err := buildTaskImages(dir, cfg.Slug); err != nil {
-		return err
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
 
-	// Check image sizes.
 	if err := checkImageSizes(cfg.Slug); err != nil {
-		return err
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
 
-	// Save images as tars.
-	for _, spec := range []struct {
-		imageTag string
-		tarName  string
-	}{
-		{cfg.Slug + ":task", "user.tar"},
-		{cfg.Slug + ":test", "test.tar"},
-	} {
-		tarPath := filepath.Join(dir, spec.tarName)
-		fmt.Printf("  Saving %s → %s\n", spec.imageTag, spec.tarName)
-		if err := dockerSave(spec.imageTag, tarPath); err != nil {
-			return fmt.Errorf("save %s: %w", spec.tarName, err)
-		}
-	}
-
-	fmt.Println("Built state ready.")
-	return nil
-}
-
-// dockerSave runs docker save -o <path> <image>.
-func dockerSave(image, path string) error {
-	return dockerRun("save", "-o", path, image)
-}
-
-// dockerLoad runs docker load -i <path>.
-func dockerLoad(path string) error {
-	return dockerRun("load", "-i", path)
+	fmt.Println("Images built successfully.")
 }
 
 // checkImageSizes inspects built images and warns/errors based on size.
@@ -117,25 +88,29 @@ func checkImageSizes(slug string) error {
 	return nil
 }
 
-// ensureBuiltImages makes sure Docker images are loaded for a task.
-// If built state, loads from tars. If raw state, builds from Dockerfiles.
+// ensureBuiltImages makes sure Docker images are available locally.
 func ensureBuiltImages(dir string, slug string) error {
 	state := detectState(dir)
-	switch state {
-	case stateBuilt:
-		fmt.Println("Loading images from tars...")
-		for _, tar := range []string{"user.tar", "test.tar"} {
-			tarPath := filepath.Join(dir, tar)
-			fmt.Printf("  Loading %s\n", tar)
-			if err := dockerLoad(tarPath); err != nil {
-				return fmt.Errorf("load %s: %w", tar, err)
-			}
-		}
-		return nil
-	case stateRaw:
+	if state == stateRaw {
 		fmt.Println("Building images from Dockerfiles...")
 		return buildTaskImages(dir, slug)
-	default:
-		return fmt.Errorf("cannot determine task state in %s (need user/Dockerfile+test/Dockerfile or user.tar+test.tar)", dir)
 	}
+	return fmt.Errorf("cannot determine task state in %s (need user/Dockerfile+test/Dockerfile)", dir)
+}
+
+func buildTaskImages(dir, slug string) error {
+	for _, spec := range []struct {
+		context string
+		tag     string
+	}{
+		{"user", slug + ":task"},
+		{"test", slug + ":test"},
+	} {
+		ctx := filepath.Join(dir, spec.context)
+		fmt.Printf("  Building %s from %s/Dockerfile...\n", spec.tag, spec.context)
+		if err := dockerRun("build", "-t", spec.tag, ctx); err != nil {
+			return fmt.Errorf("build %s failed (see docker output above): %w", spec.tag, err)
+		}
+	}
+	return nil
 }

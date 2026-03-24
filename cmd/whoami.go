@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/kagento/kagento-cli/internal/auth"
 	"github.com/spf13/cobra"
@@ -25,9 +24,8 @@ func runWhoami(cmd *cobra.Command, args []string) {
 	token := os.Getenv("KAGENTO_TOKEN")
 
 	if token == "" {
-		serverURL := envOr("KAGENTO_URL", "https://kagento.io")
 		var err error
-		token, err = auth.GetValidToken(serverURL, "contest-web")
+		token, err = auth.GetValidToken()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Not logged in. Run 'kagento login' first.")
 			os.Exit(1)
@@ -40,8 +38,19 @@ func runWhoami(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	username := claimString(claims, "preferred_username")
 	email := claimString(claims, "email")
+
+	// Try user_metadata for display name.
+	var username string
+	if um, ok := claims["user_metadata"].(map[string]interface{}); ok {
+		username = claimString(um, "preferred_username")
+		if username == "" {
+			username = claimString(um, "user_name")
+		}
+		if username == "" {
+			username = claimString(um, "full_name")
+		}
+	}
 
 	if username != "" {
 		fmt.Printf("Username: %s\n", username)
@@ -50,22 +59,10 @@ func runWhoami(cmd *cobra.Command, args []string) {
 		fmt.Printf("Email:    %s\n", email)
 	}
 
-	// Print realm roles if present.
-	if ra, ok := claims["realm_access"]; ok {
-		if raMap, ok := ra.(map[string]interface{}); ok {
-			if roles, ok := raMap["roles"]; ok {
-				if roleList, ok := roles.([]interface{}); ok {
-					var names []string
-					for _, r := range roleList {
-						if s, ok := r.(string); ok {
-							names = append(names, s)
-						}
-					}
-					if len(names) > 0 {
-						fmt.Printf("Roles:    %s\n", strings.Join(names, ", "))
-					}
-				}
-			}
+	// Print role from app_metadata if present.
+	if am, ok := claims["app_metadata"].(map[string]interface{}); ok {
+		if role := claimString(am, "app_role"); role != "" {
+			fmt.Printf("Role:     %s\n", role)
 		}
 	}
 

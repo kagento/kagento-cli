@@ -6,7 +6,7 @@ import (
 
 var taskCmd = &cobra.Command{
 	Use:   "task",
-	Short: "Task authoring commands (init, validate, build, test, pack, publish, unpublish, delete, list)",
+	Short: "Task authoring commands (init, validate, build, test, submit, publish, unpublish, delete, list)",
 }
 
 func init() {

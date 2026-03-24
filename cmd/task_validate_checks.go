@@ -15,6 +15,11 @@ import (
 func validateContainerTask(dir string) []string {
 	var errs []string
 
+	// TASK.md must not exist in user/ — task_instructions in task.yaml is the only source.
+	if _, err := os.Stat(filepath.Join(dir, "user", "TASK.md")); err == nil {
+		errs = append(errs, "user/TASK.md must not exist — use task_instructions in task.yaml instead")
+	}
+
 	for _, role := range []string{"user", "test"} {
 		dockerfilePath := filepath.Join(dir, role, "Dockerfile")
 		issues := validateDockerfile(dockerfilePath, role)
@@ -87,6 +92,11 @@ func validateDockerfile(path, role string) []string {
 			if strings.Contains(line, d) {
 				errs = append(errs, fmt.Sprintf("%s:%d: dangerous instruction: %s", prefix, lineNum, d))
 			}
+		}
+
+		// TASK.md is injected by the platform, not COPYed in Dockerfile.
+		if strings.HasPrefix(upper, "COPY ") && strings.Contains(line, "TASK.md") {
+			errs = append(errs, fmt.Sprintf("%s:%d: do not COPY TASK.md — it is injected by the platform via task_instructions in task.yaml", prefix, lineNum))
 		}
 	}
 

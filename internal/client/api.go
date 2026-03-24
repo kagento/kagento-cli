@@ -61,7 +61,7 @@ func (c *Client) StartBuild(slug, sourceKey string) (string, error) {
 
 // GetBuild returns the status of a specific build.
 func (c *Client) GetBuild(buildID string) (*BuildStatus, error) {
-	resp, err := c.backendGet("/api/builds/" + buildID)
+	resp, err := c.BackendGet("/api/builds/" + buildID)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func (c *Client) GetBuild(buildID string) (*BuildStatus, error) {
 
 // ListBuilds returns builds for a given slug.
 func (c *Client) ListBuilds(slug string) ([]BuildStatus, error) {
-	resp, err := c.backendGet("/api/builds?slug=" + slug)
+	resp, err := c.BackendGet("/api/builds?slug=" + slug)
 	if err != nil {
 		return nil, err
 	}
@@ -171,8 +171,8 @@ func (c *Client) backendPost(path string, body interface{}) ([]byte, error) {
 	return respBody, nil
 }
 
-// backendGet sends a GET request to the backend API.
-func (c *Client) backendGet(path string) ([]byte, error) {
+// BackendGet sends a GET request to the backend API.
+func (c *Client) BackendGet(path string) ([]byte, error) {
 	req, err := http.NewRequest("GET", c.BackendURL+path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)

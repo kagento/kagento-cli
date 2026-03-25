@@ -22,8 +22,8 @@ type Client struct {
 // NewClientFromEnv creates a Client populated from environment variables.
 func NewClientFromEnv() *Client {
 	return &Client{
-		URL:         envOr("KAGENTO_API", "http://localhost:8080/v1/graphql"),
-		BackendURL:  envOr("KAGENTO_BACKEND", "http://localhost:8081"),
+		URL:         envOr("KAGENTO_API", "https://kagento.io/v1/graphql"),
+		BackendURL:  envOr("KAGENTO_BACKEND", "https://kagento.io"),
 		Registry:    envOr("KAGENTO_REGISTRY", "registry.kagento.io"),
 		Token:       os.Getenv("KAGENTO_TOKEN"),
 		AdminSecret: os.Getenv("KAGENTO_ADMIN_SECRET"),

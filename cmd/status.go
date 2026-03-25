@@ -3,14 +3,15 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
 
 var statusCmd = &cobra.Command{
-	Use:   "status <session_id>",
+	Use:   "status <session-name or id>",
 	Short: "Check session status",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MinimumNArgs(1),
 	Run:   runStatus,
 }
 
@@ -19,7 +20,13 @@ func init() {
 }
 
 func runStatus(cmd *cobra.Command, args []string) {
-	sessionID := args[0]
+	nameOrID := strings.Join(args, "-")
+
+	sessionID, err := cl.ResolveSessionID(nameOrID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 
 	session, err := cl.GetSessionStatus(sessionID)
 	if err != nil {

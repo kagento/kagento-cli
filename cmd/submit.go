@@ -4,15 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 )
 
 var submitCmd = &cobra.Command{
-	Use:   "submit <session_id>",
+	Use:   "submit <session-name or id>",
 	Short: "Final submit (stops session, records score)",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MinimumNArgs(1),
 	Run:   runSubmit,
 }
 
@@ -21,7 +22,12 @@ func init() {
 }
 
 func runSubmit(cmd *cobra.Command, args []string) {
-	sessionID := args[0]
+	nameOrID := strings.Join(args, "-")
+	sessionID, err := cl.ResolveSessionID(nameOrID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 	fmt.Printf("Finishing session %s...\n", sessionID)
 
 	if err := cl.FinishSession(sessionID); err != nil {

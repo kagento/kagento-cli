@@ -4,15 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 )
 
 var checkCmd = &cobra.Command{
-	Use:   "check <session_id>",
+	Use:   "check <session-name or id>",
 	Short: "Run tests without stopping session (preview score)",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MinimumNArgs(1),
 	Run:   runCheck,
 }
 
@@ -21,7 +22,12 @@ func init() {
 }
 
 func runCheck(cmd *cobra.Command, args []string) {
-	sessionID := args[0]
+	nameOrID := strings.Join(args, "-")
+	sessionID, err := cl.ResolveSessionID(nameOrID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 	fmt.Printf("Running tests for session %s...\n", sessionID)
 
 	checkID, err := cl.CreateCheck(sessionID)

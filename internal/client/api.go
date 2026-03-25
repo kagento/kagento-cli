@@ -6,8 +6,38 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 )
+
+var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// ResolveSessionID accepts either a UUID or a two-word ssh_session_name and returns the session UUID.
+func (c *Client) ResolveSessionID(idOrName string) (string, error) {
+	if uuidRe.MatchString(idOrName) {
+		return idOrName, nil
+	}
+	// Treat as ssh_session_name.
+	resp, err := c.SupabaseGet(
+		"/rest/v1/sessions?ssh_session_name=eq." + idOrName +
+			"&select=id" +
+			"&status=in.(pending,ready,running,finishing)" +
+			"&order=created_at.desc&limit=1",
+	)
+	if err != nil {
+		return "", err
+	}
+	var rows []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(resp, &rows); err != nil {
+		return "", fmt.Errorf("parse session lookup: %w", err)
+	}
+	if len(rows) == 0 {
+		return "", fmt.Errorf("no active session found with name %q", idOrName)
+	}
+	return rows[0].ID, nil
+}
 
 // BuildStatus represents the status of a task build.
 type BuildStatus struct {

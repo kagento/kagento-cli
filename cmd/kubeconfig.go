@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -10,9 +11,9 @@ import (
 var kubeconfigOutput string
 
 var kubeconfigCmd = &cobra.Command{
-	Use:   "kubeconfig <session_id>",
+	Use:   "kubeconfig <session-name or id>",
 	Short: "Download kubeconfig for a session",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MinimumNArgs(1),
 	Run:   runKubeconfig,
 }
 
@@ -22,7 +23,13 @@ func init() {
 }
 
 func runKubeconfig(cmd *cobra.Command, args []string) {
-	sessionID := args[0]
+	nameOrID := strings.Join(args, "-")
+
+	sessionID, err := cl.ResolveSessionID(nameOrID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 
 	data, err := cl.GetKubeconfig(sessionID)
 	if err != nil {

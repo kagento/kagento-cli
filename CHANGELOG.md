@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/kagento/kagento-cli/compare/v1.1.0...v1.1.1) (2026-03-25)
+
+
+### Bug Fixes
+
+* default backend URL to production instead of localhost ([88c2cc0](https://github.com/kagento/kagento-cli/commit/88c2cc004a0033be44baa1de2f769b3867da398b))
+
 ## [1.1.0](https://github.com/kagento/kagento-cli/compare/v1.0.0...v1.1.0) (2026-03-25)
 
 

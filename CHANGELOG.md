@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/kagento/kagento-cli/compare/v1.3.0...v1.4.0) (2026-03-25)
+
+
+### Features
+
+* accept session names (two-word) in all commands ([dc27627](https://github.com/kagento/kagento-cli/commit/dc27627159c740730b87ee4f73f88079dddc69cd))
+
 ## [1.3.0](https://github.com/kagento/kagento-cli/compare/v1.2.0...v1.3.0) (2026-03-25)
 
 

@@ -171,6 +171,11 @@ func (c *Client) backendPost(path string, body interface{}) ([]byte, error) {
 	return respBody, nil
 }
 
+// GetKubeconfig downloads the kubeconfig for a session.
+func (c *Client) GetKubeconfig(sessionID string) ([]byte, error) {
+	return c.BackendGet("/api/sessions/" + sessionID + "/kubeconfig")
+}
+
 // BackendGet sends a GET request to the backend API.
 func (c *Client) BackendGet(path string) ([]byte, error) {
 	req, err := http.NewRequest("GET", c.BackendURL+path, nil)

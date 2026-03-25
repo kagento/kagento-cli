@@ -38,11 +38,7 @@ func runAuth(cmd *cobra.Command, args []string) {
 	if cl.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+cl.Token)
 	} else if cl.AdminSecret != "" {
-		req.Header.Set("x-hasura-admin-secret", cl.AdminSecret)
-		if cl.UserID != "" {
-			req.Header.Set("x-hasura-role", "user")
-			req.Header.Set("x-hasura-user-id", cl.UserID)
-		}
+		req.Header.Set("Authorization", "Bearer "+cl.AdminSecret)
 	} else {
 		fmt.Fprintln(os.Stderr, "Error: Set KAGENTO_TOKEN or KAGENTO_ADMIN_SECRET")
 		os.Exit(1)

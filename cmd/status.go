@@ -21,36 +21,15 @@ func init() {
 func runStatus(cmd *cobra.Command, args []string) {
 	sessionID := args[0]
 
-	query := `
-		query($id: uuid!) {
-			sessions_by_pk(id: $id) {
-				id
-				status
-				started_at
-				finished_at
-				task {
-					title
-				}
-			}
-		}`
-
-	data, err := cl.Query(query, map[string]interface{}{
-		"id": sessionID,
-	})
+	session, err := cl.GetSessionStatus(sessionID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	session, ok := data["sessions_by_pk"].(map[string]interface{})
-	if !ok || session == nil {
-		fmt.Fprintln(os.Stderr, "Session not found")
-		os.Exit(1)
-	}
-
 	fmt.Printf("Session: %v\n", session["id"])
-	if task, ok := session["task"].(map[string]interface{}); ok {
-		fmt.Printf("Task:    %v\n", task["title"])
+	if title, ok := session["task_title"]; ok {
+		fmt.Printf("Task:    %v\n", title)
 	}
 	fmt.Printf("Status:  %v\n", session["status"])
 	if v := session["started_at"]; v != nil {

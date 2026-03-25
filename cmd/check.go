@@ -24,42 +24,13 @@ func runCheck(cmd *cobra.Command, args []string) {
 	sessionID := args[0]
 	fmt.Printf("Running tests for session %s...\n", sessionID)
 
-	// Insert a check
-	insertMutation := `
-		mutation($session_id: uuid!) {
-			insert_checks_one(object: {session_id: $session_id}) {
-				id
-				status
-			}
-		}`
-
-	data, err := cl.Query(insertMutation, map[string]interface{}{
-		"session_id": sessionID,
-	})
+	checkID, err := cl.CreateCheck(sessionID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error inserting check: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error creating check: %v\n", err)
 		os.Exit(1)
 	}
-
-	check, ok := data["insert_checks_one"].(map[string]interface{})
-	if !ok {
-		fmt.Fprintln(os.Stderr, "Error: unexpected response format")
-		os.Exit(1)
-	}
-	checkID := check["id"].(string)
 
 	// Poll until status != "pending"
-	pollQuery := `
-		query($id: uuid!) {
-			checks_by_pk(id: $id) {
-				id
-				status
-				score
-				details
-				completed_at
-			}
-		}`
-
 	timeout := time.After(5 * time.Minute)
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -70,17 +41,10 @@ func runCheck(cmd *cobra.Command, args []string) {
 			fmt.Fprintln(os.Stderr, "Error: timed out waiting for check to complete")
 			os.Exit(1)
 		case <-ticker.C:
-			data, err := cl.Query(pollQuery, map[string]interface{}{
-				"id": checkID,
-			})
+			result, err := cl.GetCheckStatus(checkID)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error polling check: %v\n", err)
 				os.Exit(1)
-			}
-
-			result, ok := data["checks_by_pk"].(map[string]interface{})
-			if !ok {
-				continue
 			}
 
 			status, _ := result["status"].(string)

@@ -133,6 +133,110 @@ func UploadToPresignedURL(url string, data io.Reader, contentLength int64) error
 	return nil
 }
 
+// GetSessionStatus fetches session status via Supabase PostgREST.
+func (c *Client) GetSessionStatus(sessionID string) (map[string]interface{}, error) {
+	resp, err := c.SupabaseGet(
+		"/rest/v1/sessions?id=eq." + sessionID +
+			"&select=id,status,started_at,finished_at,task:tasks!sessions_task_id_fkey(title)" +
+			"&limit=1",
+	)
+	if err != nil {
+		return nil, err
+	}
+	var rows []map[string]interface{}
+	if err := json.Unmarshal(resp, &rows); err != nil {
+		return nil, fmt.Errorf("parse session status: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("session not found")
+	}
+	row := rows[0]
+	// Flatten task.title to task_title for CLI convenience.
+	if task, ok := row["task"].(map[string]interface{}); ok {
+		row["task_title"] = task["title"]
+	}
+	return row, nil
+}
+
+// FinishSession triggers the finish flow for a session.
+func (c *Client) FinishSession(sessionID string) error {
+	_, err := c.backendPost("/api/sessions/"+sessionID+"/finish", nil)
+	return err
+}
+
+// GetSessionSubmission fetches the latest submission for a session via Supabase PostgREST.
+func (c *Client) GetSessionSubmission(sessionID string) (map[string]interface{}, error) {
+	resp, err := c.SupabaseGet(
+		"/rest/v1/submissions?session_id=eq." + sessionID +
+			"&select=id,score,duration_sec,details,created_at" +
+			"&order=created_at.desc&limit=1",
+	)
+	if err != nil {
+		return nil, err
+	}
+	var rows []map[string]interface{}
+	if err := json.Unmarshal(resp, &rows); err != nil {
+		return nil, fmt.Errorf("parse submission: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("no submission found")
+	}
+	return rows[0], nil
+}
+
+// CreateCheck creates a new check for a session and returns the check ID.
+func (c *Client) CreateCheck(sessionID string) (string, error) {
+	resp, err := c.backendPost("/api/sessions/"+sessionID+"/check", nil)
+	if err != nil {
+		return "", err
+	}
+	var result struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return "", fmt.Errorf("parse check: %w", err)
+	}
+	return result.ID, nil
+}
+
+// GetCheckStatus fetches check status via Supabase PostgREST.
+func (c *Client) GetCheckStatus(checkID string) (map[string]interface{}, error) {
+	resp, err := c.SupabaseGet(
+		"/rest/v1/checks?id=eq." + checkID +
+			"&select=id,status,score,details,completed_at" +
+			"&limit=1",
+	)
+	if err != nil {
+		return nil, err
+	}
+	var rows []map[string]interface{}
+	if err := json.Unmarshal(resp, &rows); err != nil {
+		return nil, fmt.Errorf("parse check status: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("check not found")
+	}
+	return rows[0], nil
+}
+
+// UnpublishTask sets a task back to draft via Supabase PostgREST.
+func (c *Client) UnpublishTask(slug string) error {
+	_, err := c.SupabasePatch(
+		"/rest/v1/tasks?slug=eq."+slug+"&status=eq.published",
+		map[string]interface{}{"status": "draft"},
+	)
+	return err
+}
+
+// ArchiveTask archives a task via Supabase PostgREST.
+func (c *Client) ArchiveTask(slug string) error {
+	_, err := c.SupabasePatch(
+		"/rest/v1/tasks?slug=eq."+slug,
+		map[string]interface{}{"status": "archived"},
+	)
+	return err
+}
+
 // backendPost sends a POST request to the backend API.
 func (c *Client) backendPost(path string, body interface{}) ([]byte, error) {
 	var reqBody io.Reader

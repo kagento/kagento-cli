@@ -84,3 +84,42 @@ func (c *Client) SupabasePatch(path string, body map[string]interface{}) ([]byte
 
 	return respBody, nil
 }
+
+// SupabasePost sends a POST request to the Supabase PostgREST API.
+func (c *Client) SupabasePost(path string, body map[string]interface{}) ([]byte, error) {
+	supabaseURL := envOr("SUPABASE_URL", defaultSupabaseURL)
+	url := strings.TrimRight(supabaseURL, "/") + path
+
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal body: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", url, strings.NewReader(string(data)))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("apikey", supabaseAnonKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Prefer", "return=representation")
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return respBody, nil
+}

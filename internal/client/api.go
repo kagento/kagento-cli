@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // BuildStatus represents the status of a task build.
@@ -158,9 +159,13 @@ func (c *Client) GetSessionStatus(sessionID string) (map[string]interface{}, err
 	return row, nil
 }
 
-// FinishSession triggers the finish flow for a session.
+// FinishSession triggers the finish flow by setting session status to "finishing" via Supabase.
+// The backend event handler picks up the status change and runs tests.
 func (c *Client) FinishSession(sessionID string) error {
-	_, err := c.backendPost("/api/sessions/"+sessionID+"/finish", nil)
+	_, err := c.SupabasePatch(
+		"/rest/v1/sessions?id=eq."+sessionID+"&status=in.(ready,running)",
+		map[string]interface{}{"status": "finishing"},
+	)
 	return err
 }
 
@@ -184,19 +189,24 @@ func (c *Client) GetSessionSubmission(sessionID string) (map[string]interface{},
 	return rows[0], nil
 }
 
-// CreateCheck creates a new check for a session and returns the check ID.
+// CreateCheck creates a new check for a session via Supabase and returns the check ID.
 func (c *Client) CreateCheck(sessionID string) (string, error) {
-	resp, err := c.backendPost("/api/sessions/"+sessionID+"/check", nil)
+	resp, err := c.SupabasePost("/rest/v1/checks", map[string]interface{}{
+		"session_id": sessionID,
+	})
 	if err != nil {
 		return "", err
 	}
-	var result struct {
+	var rows []struct {
 		ID string `json:"id"`
 	}
-	if err := json.Unmarshal(resp, &result); err != nil {
+	if err := json.Unmarshal(resp, &rows); err != nil {
 		return "", fmt.Errorf("parse check: %w", err)
 	}
-	return result.ID, nil
+	if len(rows) == 0 {
+		return "", fmt.Errorf("failed to create check")
+	}
+	return rows[0].ID, nil
 }
 
 // GetCheckStatus fetches check status via Supabase PostgREST.
@@ -275,9 +285,34 @@ func (c *Client) backendPost(path string, body interface{}) ([]byte, error) {
 	return respBody, nil
 }
 
-// GetKubeconfig downloads the kubeconfig for a session.
+// GetKubeconfig downloads the kubeconfig for a session via Supabase.
 func (c *Client) GetKubeconfig(sessionID string) ([]byte, error) {
-	return c.BackendGet("/api/sessions/" + sessionID + "/kubeconfig")
+	resp, err := c.SupabaseGet(
+		"/rest/v1/sessions?id=eq." + sessionID +
+			"&select=kubeconfig" +
+			"&limit=1",
+	)
+	if err != nil {
+		return nil, err
+	}
+	var rows []struct {
+		Kubeconfig *string `json:"kubeconfig"`
+	}
+	if err := json.Unmarshal(resp, &rows); err != nil {
+		return nil, fmt.Errorf("parse kubeconfig response: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("session not found")
+	}
+	if rows[0].Kubeconfig == nil || *rows[0].Kubeconfig == "" {
+		return nil, fmt.Errorf("kubeconfig not ready yet")
+	}
+	kc := *rows[0].Kubeconfig
+	// Normalize escaped newlines.
+	if strings.Contains(kc, "\\n") {
+		kc = strings.ReplaceAll(kc, "\\n", "\n")
+	}
+	return []byte(kc), nil
 }
 
 // BackendGet sends a GET request to the backend API.

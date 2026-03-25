@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/kagento/kagento-cli/compare/v1.2.0...v1.3.0) (2026-03-25)
+
+
+### Features
+
+* use Supabase for all CLI operations, remove backend dependency ([0b3d671](https://github.com/kagento/kagento-cli/commit/0b3d671710485ac645d3458e2560217d0b92553a))
+
 ## [1.2.0](https://github.com/kagento/kagento-cli/compare/v1.1.1...v1.2.0) (2026-03-25)
 
 

@@ -30,7 +30,11 @@ type taskListItem struct {
 }
 
 func runTaskList(cmd *cobra.Command, args []string) {
-	resp, err := cl.BackendGet("/api/tasks/")
+	resp, err := cl.SupabaseGet(
+		"/rest/v1/tasks?status=eq.published" +
+			"&select=slug,title,difficulty,size,category,environment_type,scoring_type" +
+			"&order=created_at.desc",
+	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error listing tasks: %v\n", err)
 		os.Exit(1)

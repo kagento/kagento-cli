@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 )
@@ -90,22 +91,33 @@ func (c *Client) StartBuild(slug, sourceKey string) (string, error) {
 	return result.BuildID, nil
 }
 
-// GetBuild returns the status of a specific build.
+// GetBuild returns the status of a specific build via Supabase PostgREST.
 func (c *Client) GetBuild(buildID string) (*BuildStatus, error) {
-	resp, err := c.BackendGet("/api/builds/" + buildID)
+	resp, err := c.SupabaseGet(
+		"/rest/v1/task_builds?id=eq." + buildID +
+			"&select=id,slug,status,user_image_digest,test_image_digest,signed,error,created_at,completed_at" +
+			"&limit=1",
+	)
 	if err != nil {
 		return nil, err
 	}
-	var result BuildStatus
-	if err := json.Unmarshal(resp, &result); err != nil {
+	var rows []BuildStatus
+	if err := json.Unmarshal(resp, &rows); err != nil {
 		return nil, fmt.Errorf("parse build status: %w", err)
 	}
-	return &result, nil
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("build not found")
+	}
+	return &rows[0], nil
 }
 
-// ListBuilds returns builds for a given slug.
+// ListBuilds returns builds for a given slug via Supabase PostgREST.
 func (c *Client) ListBuilds(slug string) ([]BuildStatus, error) {
-	resp, err := c.BackendGet("/api/builds?slug=" + slug)
+	resp, err := c.SupabaseGet(
+		"/rest/v1/task_builds?slug=eq." + url.QueryEscape(slug) +
+			"&select=id,slug,status,user_image_digest,test_image_digest,signed,error,created_at,completed_at" +
+			"&order=created_at.desc",
+	)
 	if err != nil {
 		return nil, err
 	}

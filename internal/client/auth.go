@@ -80,3 +80,39 @@ func (c *Client) doWithAuthRetry(buildRequest func(forceRefresh bool) (*http.Req
 
 	return nil, fmt.Errorf("request failed after token refresh retry")
 }
+
+func (c *Client) currentToken() (string, error) {
+	if c.AdminSecret != "" {
+		return "", nil
+	}
+	if c.StaticToken {
+		return c.Token, nil
+	}
+	token, err := getValidToken()
+	if err != nil {
+		if c.Token != "" {
+			return c.Token, nil
+		}
+		return "", err
+	}
+	c.Token = token
+	return token, nil
+}
+
+func (c *Client) CurrentUserID() (string, error) {
+	token, err := c.currentToken()
+	if err != nil {
+		return "", err
+	}
+	if token == "" {
+		return "", nil
+	}
+	claims, err := auth.ParseJWTClaims(token)
+	if err != nil {
+		return "", err
+	}
+	if sub, ok := claims["sub"].(string); ok {
+		return sub, nil
+	}
+	return "", fmt.Errorf("missing sub claim in access token")
+}

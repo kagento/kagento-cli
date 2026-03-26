@@ -1,17 +1,19 @@
 package cmd
 
 import (
-	"archive/tar"
-	"compress/gzip"
-	"encoding/json"
 	"fmt"
-	"io"
 	"os"
-	"path/filepath"
-	"time"
 
-	"github.com/kagento/kagento-cli/internal/client"
 	"github.com/spf13/cobra"
+)
+
+var (
+	taskSubmitAll     bool
+	taskSubmitDraft   bool
+	taskSubmitJobs    int
+	taskSubmitJSON    bool
+	taskSubmitPublish bool
+	taskSubmitResume  bool
 )
 
 var taskSubmitCmd = &cobra.Command{
@@ -26,271 +28,97 @@ directly from task.yaml metadata.`,
 }
 
 func init() {
+	taskSubmitCmd.Flags().BoolVar(&taskSubmitAll, "all", false, "Submit every task found under the given directory")
+	taskSubmitCmd.Flags().BoolVar(&taskSubmitDraft, "draft", false, "Publish submitted tasks as draft when combined with --publish")
+	taskSubmitCmd.Flags().IntVar(&taskSubmitJobs, "jobs", 3, "Maximum concurrent task submits when using --all")
+	taskSubmitCmd.Flags().BoolVar(&taskSubmitJSON, "json", false, "Output JSON")
+	taskSubmitCmd.Flags().BoolVar(&taskSubmitPublish, "publish", false, "Publish automatically after the build completes")
+	taskSubmitCmd.Flags().BoolVar(&taskSubmitResume, "resume", false, "Reuse the latest build for the task instead of starting a new one")
 	taskCmd.AddCommand(taskSubmitCmd)
 }
 
 func runTaskSubmit(cmd *cobra.Command, args []string) {
-	dir := "."
+	root := "."
 	if len(args) > 0 {
-		dir = args[0]
+		root = args[0]
 	}
 
-	// Step 1: Validate.
-	cfg, err := loadAndValidateTask(dir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("Task: %s (%s)\n", cfg.Title, cfg.Slug)
-
-	// vcluster tasks don't need a server-side build — publish directly.
-	if cfg.EnvironmentType == "vcluster" {
-		runVclusterSubmit(cfg, dir)
-		return
+	opts := submitTaskOptions{
+		Publish: taskSubmitPublish,
+		Draft:   taskSubmitDraft,
+		Resume:  taskSubmitResume,
+		Stream:  !taskSubmitJSON && !taskSubmitAll,
 	}
 
-	// Step 2: Create tar.gz of raw task directory.
-	fmt.Println("Creating source archive...")
-	tarPath, err := createSourceTar(dir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating archive: %v\n", err)
-		os.Exit(1)
-	}
-	defer os.Remove(tarPath)
-
-	tarInfo, err := os.Stat(tarPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("  Archive size: %.1f KB\n", float64(tarInfo.Size())/1024)
-
-	// Step 3: Get presigned upload URL.
-	fmt.Println("Requesting upload URL...")
-	presign, err := cl.PresignBuildUpload()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error getting upload URL: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Step 4: Upload.
-	fmt.Println("Uploading source archive...")
-	tarFile, err := os.Open(tarPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-	defer tarFile.Close()
-
-	if err := client.UploadToPresignedURL(presign.UploadURL, tarFile, tarInfo.Size()); err != nil {
-		fmt.Fprintf(os.Stderr, "Error uploading: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Println("  Upload complete.")
-
-	// Step 5: Start build.
-	fmt.Println("Starting build...")
-	buildID, err := cl.StartBuild(cfg.Slug, presign.SourceKey)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error starting build: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("  Build ID: %s\n", buildID)
-
-	// Step 6: Poll for completion.
-	fmt.Println("Waiting for build to complete...")
-	build, err := waitForBuildCompletion(cl, buildID, 3*time.Second, os.Stdout, os.Stderr)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error checking build: %v\n", err)
-		fmt.Fprintf(os.Stderr, "Build may still be running. Retry later with: kagento task publish %s --build-id=%s\n", dir, buildID)
-		os.Exit(1)
-	}
-
-	switch build.Status {
-	case "completed":
-		fmt.Println()
-		fmt.Println("Build completed successfully!")
-		fmt.Printf("  User image: %s\n", build.UserImageDigest)
-		fmt.Printf("  Test image: %s\n", build.TestImageDigest)
-		fmt.Printf("  Signed:     %v\n", build.Signed)
-		fmt.Println()
-		fmt.Printf("To publish: kagento task publish %s --build-id=%s\n", dir, buildID)
-		return
-	case "failed":
-		fmt.Fprintf(os.Stderr, "\nBuild failed: %s\n", build.Error)
-		os.Exit(1)
-	}
-}
-
-func runVclusterSubmit(cfg *TaskConfig, dir string) {
-	// Read provision manifest files and encode as JSON.
-	var manifests []json.RawMessage
-	for _, manifestPath := range cfg.Provision.Manifests {
-		fullPath := filepath.Join(dir, manifestPath)
-		data, err := os.ReadFile(fullPath)
+	if taskSubmitAll {
+		dirs, err := discoverTaskDirs(root)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading manifest %s: %v\n", manifestPath, err)
+			fmt.Fprintf(os.Stderr, "Error discovering tasks: %v\n", err)
 			os.Exit(1)
 		}
-		// Wrap YAML content as a JSON string.
-		encoded, _ := json.Marshal(string(data))
-		manifests = append(manifests, encoded)
+		if len(dirs) == 0 {
+			fmt.Fprintln(os.Stderr, "Error: no task directories found")
+			os.Exit(1)
+		}
+
+		results := runTaskBatch(dirs, taskSubmitJobs, func(dir string) taskActionResult {
+			return submitTaskDir(dir, submitTaskOptions{
+				Publish: opts.Publish,
+				Draft:   opts.Draft,
+				Resume:  opts.Resume,
+				Stream:  false,
+			})
+		})
+		if taskSubmitJSON {
+			printJSON(results)
+		} else {
+			printTaskBatchResults("Submitted", results)
+		}
+		if taskBatchHasErrors(results) {
+			os.Exit(1)
+		}
+		return
 	}
 
-	// Encode checks as JSON.
-	var checks []json.RawMessage
-	for _, check := range cfg.Checks {
-		encoded, _ := json.Marshal(check)
-		checks = append(checks, encoded)
+	result := submitTaskDir(root, opts)
+	if taskSubmitJSON {
+		printJSON(result)
+		if result.Error != "" {
+			os.Exit(1)
+		}
+		return
 	}
 
-	scoringType := cfg.ScoringType
-	if scoringType == "" {
-		scoringType = "gradient"
-	}
-	difficulty := cfg.Difficulty
-	if difficulty == "" {
-		difficulty = "medium"
-	}
-	containerSize := cfg.ContainerSize
-	if containerSize == "" {
-		containerSize = "small"
-	}
-	timeLimitSec := cfg.TimeLimitSec
-	if timeLimitSec == 0 {
-		timeLimitSec = 3600
-	}
-
-	body := map[string]interface{}{
-		"slug":                cfg.Slug,
-		"title":               cfg.Title,
-		"short_desc":          cfg.ShortDesc,
-		"description":         cfg.Description,
-		"task_instructions":   cfg.TaskInstructions,
-		"difficulty":          difficulty,
-		"size":                containerSize,
-		"time_limit_sec":      timeLimitSec,
-		"scoring_type":        scoringType,
-		"provision_manifests": manifests,
-		"checks":              checks,
-	}
-	if cfg.ScoringConfig != nil {
-		body["scoring_config"] = cfg.ScoringConfig
-	}
-	if cfg.Category != "" {
-		body["category"] = cfg.Category
-	}
-
-	fmt.Println("Publishing vcluster task...")
-	result, err := cl.PublishK8sTask(body)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error publishing: %v\n", err)
+	if result.Error != "" {
+		fmt.Fprintf(os.Stderr, "\nError: %s\n", result.Error)
+		if result.BuildID != "" {
+			fmt.Fprintf(os.Stderr, "Retry later with: kagento task wait %s\n", result.BuildID)
+		}
 		os.Exit(1)
 	}
 
 	fmt.Println()
-	fmt.Printf("Published task: %s\n", cfg.Slug)
-	fmt.Printf("  Task ID: %s\n", result["task_id"])
-	fmt.Printf("  Status:  %s\n", result["status"])
-}
-
-// createSourceTar creates a .tar.gz of the raw task directory.
-// Includes: task.yaml, user/*, test/*, solution/*
-func createSourceTar(dir string) (string, error) {
-	tmpFile, err := os.CreateTemp("", "kagento-submit-*.tar.gz")
-	if err != nil {
-		return "", err
-	}
-	defer tmpFile.Close()
-
-	gw := gzip.NewWriter(tmpFile)
-	defer gw.Close()
-
-	tw := tar.NewWriter(gw)
-	defer tw.Close()
-
-	// Walk the directory and add relevant files.
-	dirs := []string{"user", "test", "solution"}
-	files := []string{"task.yaml"}
-
-	// Add top-level files.
-	for _, f := range files {
-		srcPath := filepath.Join(dir, f)
-		if err := addFileToTar(tw, srcPath, f); err != nil {
-			os.Remove(tmpFile.Name())
-			return "", fmt.Errorf("add %s: %w", f, err)
-		}
+	if result.EnvironmentType == "vcluster" {
+		fmt.Printf("Published task: %s\n", result.Slug)
+		fmt.Printf("  Task ID: %s\n", result.TaskID)
+		fmt.Printf("  Status:  %s\n", result.PublishedStatus)
+		return
 	}
 
-	// Add subdirectories.
-	for _, d := range dirs {
-		subDir := filepath.Join(dir, d)
-		if _, err := os.Stat(subDir); os.IsNotExist(err) {
-			continue
-		}
-		err := filepath.Walk(subDir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			relPath, err := filepath.Rel(dir, path)
-			if err != nil {
-				return err
-			}
-
-			header, err := tar.FileInfoHeader(info, "")
-			if err != nil {
-				return err
-			}
-			header.Name = relPath
-
-			if err := tw.WriteHeader(header); err != nil {
-				return err
-			}
-
-			if info.IsDir() {
-				return nil
-			}
-
-			f, err := os.Open(path)
-			if err != nil {
-				return err
-			}
-			defer f.Close()
-
-			_, err = io.Copy(tw, f)
-			return err
-		})
-		if err != nil {
-			os.Remove(tmpFile.Name())
-			return "", fmt.Errorf("add %s/: %w", d, err)
-		}
+	if result.ReusedBuild {
+		fmt.Printf("Reused build %s\n", result.BuildID)
+	}
+	if result.PublishedStatus != "" {
+		fmt.Printf("Published task: %s\n", result.Slug)
+		fmt.Printf("  Build ID: %s\n", result.BuildID)
+		fmt.Printf("  Task ID:  %s\n", result.TaskID)
+		fmt.Printf("  Status:   %s\n", result.PublishedStatus)
+		return
 	}
 
-	return tmpFile.Name(), nil
-}
-
-func addFileToTar(tw *tar.Writer, srcPath, name string) error {
-	fi, err := os.Stat(srcPath)
-	if err != nil {
-		return err
-	}
-
-	hdr := &tar.Header{
-		Name: name,
-		Mode: int64(fi.Mode()),
-		Size: fi.Size(),
-	}
-
-	if err := tw.WriteHeader(hdr); err != nil {
-		return err
-	}
-
-	f, err := os.Open(srcPath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	_, err = io.Copy(tw, f)
-	return err
+	fmt.Println("Build completed successfully!")
+	fmt.Printf("  Build ID: %s\n", result.BuildID)
+	fmt.Printf("  Status:   %s\n", result.BuildStatus)
+	fmt.Println()
+	fmt.Printf("To publish: kagento task publish %s --build-id=%s\n", root, result.BuildID)
 }

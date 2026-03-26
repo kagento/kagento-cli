@@ -8,6 +8,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var statusJSON bool
+
 var statusCmd = &cobra.Command{
 	Use:   "status <session-name or id>",
 	Short: "Check session status",
@@ -16,6 +18,7 @@ var statusCmd = &cobra.Command{
 }
 
 func init() {
+	statusCmd.Flags().BoolVar(&statusJSON, "json", false, "Output JSON")
 	rootCmd.AddCommand(statusCmd)
 }
 
@@ -32,6 +35,11 @@ func runStatus(cmd *cobra.Command, args []string) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
+	}
+
+	if statusJSON {
+		printJSON(session)
+		return
 	}
 
 	fmt.Printf("Session: %v\n", session["id"])

@@ -27,18 +27,52 @@ kagento check <session_id>
 kagento submit <session_id>
 ```
 
+## Task authoring quick start
+
+```bash
+# Validate a task directory
+kagento task validate tasks/example-task
+
+# Submit a task build and wait for completion
+kagento task submit tasks/example-task
+
+# Publish the latest completed build for a task
+kagento task publish tasks/example-task --latest
+
+# List your recent builds
+kagento task builds example-task
+```
+
 ## Commands
 
 | Command | Description |
 |---------|-------------|
 | `kagento login` | Log in via browser (OAuth 2.0 device flow) |
 | `kagento logout` | Clear saved credentials |
-| `kagento whoami` | Show current user |
+| `kagento whoami [--json]` | Show current user |
 | `kagento check <session_id>` | Run tests and preview your score without ending the session |
 | `kagento submit <session_id>` | Submit your solution -- runs final tests, stops the session, records your score |
-| `kagento status <session_id>` | Show session status, task name, and timing |
+| `kagento status <session_id> [--json]` | Show session status, task name, and timing |
+| `kagento self-update [--check]` | Check for or install a newer CLI release |
 | `kagento auth` | Authenticate with the Docker registry (for task authors) |
-| `kagento push <slug>` | Push task + test images to the registry (for task authors) |
+
+## Task authoring commands
+
+| Command | Description |
+|---------|-------------|
+| `kagento task validate <path>` | Validate `task.yaml` and required files |
+| `kagento task submit <path>` | Submit a task for server-side building |
+| `kagento task submit --all tasks/ --jobs 4 --publish` | Batch submit and publish multiple tasks with bounded parallelism |
+| `kagento task publish <path-or-slug> --latest` | Publish the latest completed build for a task |
+| `kagento task builds [slug-or-path]` | List your recent builds |
+| `kagento task build-status <build-id>` | Show build status for a specific build |
+| `kagento task logs <build-id>` | Stream build progress updates |
+| `kagento task wait <build-id>` | Wait for a build to finish |
+| `kagento task retry <build-id>` | Retry a build using the same uploaded source |
+| `kagento task cancel <build-id>` | Cancel an in-flight build |
+| `kagento task list [--mine] [--status draft]` | List public tasks or your own authored tasks |
+| `kagento task get <slug>` | Show task metadata |
+| `kagento task update <slug-or-path>` | Update task metadata without rebuilding images |
 
 ## Typical session flow
 
@@ -87,7 +121,7 @@ These are optional. The defaults work for production use after `kagento login`.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `KAGENTO_URL` | `https://kagento.io` | Server URL for auth |
-| `KAGENTO_API` | `http://localhost:8080/v1/graphql` | GraphQL endpoint |
+| `KAGENTO_API` | `http://localhost:8080/v1/graphql` | Legacy GraphQL endpoint |
 | `KAGENTO_BACKEND` | `http://localhost:8081` | Backend HTTP endpoint |
 | `KAGENTO_REGISTRY` | `localhost:5000` | Docker registry (for task authors) |
 | `KAGENTO_TOKEN` | -- | Auth token override |

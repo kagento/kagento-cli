@@ -8,6 +8,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var whoamiJSON bool
+
 var whoamiCmd = &cobra.Command{
 	Use:   "whoami",
 	Short: "Show the currently logged-in user",
@@ -16,6 +18,7 @@ var whoamiCmd = &cobra.Command{
 }
 
 func init() {
+	whoamiCmd.Flags().BoolVar(&whoamiJSON, "json", false, "Output JSON")
 	rootCmd.AddCommand(whoamiCmd)
 }
 
@@ -53,17 +56,37 @@ func runWhoami(cmd *cobra.Command, args []string) {
 	}
 
 	if username != "" {
-		fmt.Printf("Username: %s\n", username)
+		if !whoamiJSON {
+			fmt.Printf("Username: %s\n", username)
+		}
 	}
 	if email != "" {
-		fmt.Printf("Email:    %s\n", email)
+		if !whoamiJSON {
+			fmt.Printf("Email:    %s\n", email)
+		}
 	}
 
 	// Print role from app_metadata if present.
 	if am, ok := claims["app_metadata"].(map[string]interface{}); ok {
 		if role := claimString(am, "app_role"); role != "" {
-			fmt.Printf("Role:     %s\n", role)
+			if whoamiJSON {
+				claims["role"] = role
+			} else {
+				fmt.Printf("Role:     %s\n", role)
+			}
 		}
+	}
+
+	if whoamiJSON {
+		out := map[string]any{
+			"username": username,
+			"email":    email,
+		}
+		if role, ok := claims["role"].(string); ok && role != "" {
+			out["role"] = role
+		}
+		printJSON(out)
+		return
 	}
 
 	if username == "" && email == "" {

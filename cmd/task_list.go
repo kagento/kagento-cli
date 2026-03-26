@@ -1,12 +1,19 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"text/tabwriter"
 
+	"github.com/kagento/kagento-cli/internal/client"
 	"github.com/spf13/cobra"
+)
+
+var (
+	taskListMine   bool
+	taskListStatus string
+	taskListLimit  int
+	taskListJSON   bool
 )
 
 var taskListCmd = &cobra.Command{
@@ -16,34 +23,27 @@ var taskListCmd = &cobra.Command{
 }
 
 func init() {
+	taskListCmd.Flags().BoolVar(&taskListMine, "mine", false, "List your authored tasks instead of public published tasks")
+	taskListCmd.Flags().StringVar(&taskListStatus, "status", "", "Filter by task status")
+	taskListCmd.Flags().IntVar(&taskListLimit, "limit", 100, "Maximum tasks to return")
+	taskListCmd.Flags().BoolVar(&taskListJSON, "json", false, "Output JSON")
 	taskCmd.AddCommand(taskListCmd)
 }
 
-type taskListItem struct {
-	Slug            string `json:"slug"`
-	Title           string `json:"title"`
-	Difficulty      string `json:"difficulty"`
-	Size            string `json:"size"`
-	Category        string `json:"category"`
-	EnvironmentType string `json:"environment_type"`
-	ScoringType     string `json:"scoring_type"`
-}
-
 func runTaskList(cmd *cobra.Command, args []string) {
-	resp, err := cl.SupabaseGet(
-		"/rest/v1/tasks?status=eq.published" +
-			"&select=slug,title,difficulty,size,category,environment_type,scoring_type" +
-			"&order=created_at.desc",
-	)
+	tasks, err := cl.ListTasks(client.ListTasksOptions{
+		Mine:   taskListMine,
+		Status: taskListStatus,
+		Limit:  taskListLimit,
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error listing tasks: %v\n", err)
 		os.Exit(1)
 	}
 
-	var tasks []taskListItem
-	if err := json.Unmarshal(resp, &tasks); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing response: %v\n", err)
-		os.Exit(1)
+	if taskListJSON {
+		printJSON(tasks)
+		return
 	}
 
 	if len(tasks) == 0 {
@@ -52,12 +52,27 @@ func runTaskList(cmd *cobra.Command, args []string) {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "SLUG\tTITLE\tDIFFICULTY\tTYPE\tCATEGORY")
-	fmt.Fprintln(w, "----\t-----\t----------\t----\t--------")
-
+	fmt.Fprintln(w, "SLUG\tTITLE\tSTATUS\tDIFFICULTY\tTYPE\tCATEGORY")
+	fmt.Fprintln(w, "----\t-----\t------\t----------\t----\t--------")
 	for _, t := range tasks {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			t.Slug, t.Title, t.Difficulty, t.EnvironmentType, t.Category,
+		status := t.Status
+		if status == "" {
+			status = "--"
+		}
+		difficulty := t.Difficulty
+		if difficulty == "" {
+			difficulty = "--"
+		}
+		envType := t.EnvironmentType
+		if envType == "" {
+			envType = "--"
+		}
+		category := t.Category
+		if category == "" {
+			category = "--"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			t.Slug, t.Title, status, difficulty, envType, category,
 		)
 	}
 	w.Flush()

@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.5.0](https://github.com/kagento/kagento-cli/compare/v1.4.1...v1.5.0) (2026-03-26)
+
+
+### Features
+
+* add build inspection and control commands for task authors
+* add authored task get and update commands
+* add batch task submit and publish flows with bounded parallelism
+* add JSON output to more commands and add CLI self-update
+
 ## [1.4.1](https://github.com/kagento/kagento-cli/compare/v1.4.0...v1.4.1) (2026-03-26)
 
 

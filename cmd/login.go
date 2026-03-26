@@ -194,7 +194,7 @@ func exchangeCode(supabaseURL, code, redirectURI string) (*tokenResult, error) {
 	tokenURL := supabaseURL + "/auth/v1/token?grant_type=pkce"
 
 	form := url.Values{
-		"auth_code":    {code},
+		"auth_code":     {code},
 		"code_verifier": {""},
 	}
 

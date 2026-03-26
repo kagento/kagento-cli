@@ -47,10 +47,20 @@ type BuildStatus struct {
 	Status          string `json:"status"`
 	UserImageDigest string `json:"user_image_digest,omitempty"`
 	TestImageDigest string `json:"test_image_digest,omitempty"`
+	UserBaseImage   string `json:"user_base_image,omitempty"`
+	TestBaseImage   string `json:"test_base_image,omitempty"`
 	Signed          bool   `json:"signed"`
+	Progress        string `json:"progress,omitempty"`
+	StepTimings     any    `json:"step_timings,omitempty"`
 	Error           string `json:"error,omitempty"`
 	CreatedAt       string `json:"created_at,omitempty"`
 	CompletedAt     string `json:"completed_at,omitempty"`
+}
+
+type ListBuildsOptions struct {
+	Slug   string
+	Status string
+	Limit  int
 }
 
 // PresignResponse holds the presigned upload URL and source key.
@@ -91,39 +101,70 @@ func (c *Client) StartBuild(slug, sourceKey string) (string, error) {
 	return result.BuildID, nil
 }
 
-// GetBuild returns the status of a specific build via Supabase PostgREST.
+// GetBuild returns the status of a specific build.
 func (c *Client) GetBuild(buildID string) (*BuildStatus, error) {
-	resp, err := c.SupabaseGet(
-		"/rest/v1/task_builds?id=eq." + buildID +
-			"&select=id,slug,status,user_image_digest,test_image_digest,signed,error,created_at,completed_at" +
-			"&limit=1",
-	)
+	resp, err := c.BackendGet("/api/builds/" + buildID)
 	if err != nil {
 		return nil, err
 	}
-	var rows []BuildStatus
-	if err := json.Unmarshal(resp, &rows); err != nil {
+	var result BuildStatus
+	if err := json.Unmarshal(resp, &result); err != nil {
 		return nil, fmt.Errorf("parse build status: %w", err)
 	}
-	if len(rows) == 0 {
-		return nil, fmt.Errorf("build not found")
-	}
-	return &rows[0], nil
+	return &result, nil
 }
 
-// ListBuilds returns builds for a given slug via Supabase PostgREST.
+// ListBuilds returns builds for a given slug.
 func (c *Client) ListBuilds(slug string) ([]BuildStatus, error) {
-	resp, err := c.SupabaseGet(
-		"/rest/v1/task_builds?slug=eq." + url.QueryEscape(slug) +
-			"&select=id,slug,status,user_image_digest,test_image_digest,signed,error,created_at,completed_at" +
-			"&order=created_at.desc",
-	)
+	return c.ListBuildsWithOptions(ListBuildsOptions{Slug: slug})
+}
+
+func (c *Client) ListBuildsWithOptions(opts ListBuildsOptions) ([]BuildStatus, error) {
+	query := url.Values{}
+	if opts.Slug != "" {
+		query.Set("slug", opts.Slug)
+	}
+	if opts.Status != "" {
+		query.Set("status", opts.Status)
+	}
+	if opts.Limit > 0 {
+		query.Set("limit", fmt.Sprintf("%d", opts.Limit))
+	}
+	path := "/api/builds"
+	if encoded := query.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	resp, err := c.BackendGet(path)
 	if err != nil {
 		return nil, err
 	}
 	var result []BuildStatus
 	if err := json.Unmarshal(resp, &result); err != nil {
 		return nil, fmt.Errorf("parse builds list: %w", err)
+	}
+	return result, nil
+}
+
+func (c *Client) RetryBuild(buildID string) (*BuildStatus, error) {
+	resp, err := c.backendPost("/api/builds/"+buildID+"/retry", nil)
+	if err != nil {
+		return nil, err
+	}
+	var result BuildStatus
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("parse retry response: %w", err)
+	}
+	return &result, nil
+}
+
+func (c *Client) CancelBuild(buildID string) (map[string]any, error) {
+	resp, err := c.backendPost("/api/builds/"+buildID+"/cancel", nil)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]any
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("parse cancel response: %w", err)
 	}
 	return result, nil
 }
@@ -302,6 +343,44 @@ func (c *Client) backendPost(path string, body interface{}) ([]byte, error) {
 
 	resp, err := c.doWithAuthRetry(func(forceRefresh bool) (*http.Request, error) {
 		req, err := http.NewRequest("POST", c.BackendURL+path, bytes.NewReader(data))
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if err := c.setAuthHeader(req, forceRefresh); err != nil {
+			return nil, err
+		}
+		return req, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return respBody, nil
+}
+
+func (c *Client) backendPatch(path string, body interface{}) ([]byte, error) {
+	var data []byte
+	if body != nil {
+		var err error
+		data, err = json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("marshal request: %w", err)
+		}
+	}
+
+	resp, err := c.doWithAuthRetry(func(forceRefresh bool) (*http.Request, error) {
+		req, err := http.NewRequest("PATCH", c.BackendURL+path, bytes.NewReader(data))
 		if err != nil {
 			return nil, fmt.Errorf("create request: %w", err)
 		}

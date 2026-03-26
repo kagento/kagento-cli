@@ -154,4 +154,3 @@ func loadTaskConfig(dir string) (*TaskConfig, error) {
 
 	return &cfg, nil
 }
-

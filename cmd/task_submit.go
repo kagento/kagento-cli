@@ -99,35 +99,26 @@ func runTaskSubmit(cmd *cobra.Command, args []string) {
 
 	// Step 6: Poll for completion.
 	fmt.Println("Waiting for build to complete...")
-	lastStatus := ""
-	for {
-		build, err := cl.GetBuild(buildID)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error checking build: %v\n", err)
-			os.Exit(1)
-		}
+	build, err := waitForBuildCompletion(cl, buildID, 3*time.Second, os.Stdout, os.Stderr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error checking build: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Build may still be running. Retry later with: kagento task publish %s --build-id=%s\n", dir, buildID)
+		os.Exit(1)
+	}
 
-		if build.Status != lastStatus {
-			fmt.Printf("  Status: %s\n", build.Status)
-			lastStatus = build.Status
-		}
-
-		switch build.Status {
-		case "completed":
-			fmt.Println()
-			fmt.Println("Build completed successfully!")
-			fmt.Printf("  User image: %s\n", build.UserImageDigest)
-			fmt.Printf("  Test image: %s\n", build.TestImageDigest)
-			fmt.Printf("  Signed:     %v\n", build.Signed)
-			fmt.Println()
-			fmt.Printf("To publish: kagento task publish --build-id=%s\n", buildID)
-			return
-		case "failed":
-			fmt.Fprintf(os.Stderr, "\nBuild failed: %s\n", build.Error)
-			os.Exit(1)
-		}
-
-		time.Sleep(3 * time.Second)
+	switch build.Status {
+	case "completed":
+		fmt.Println()
+		fmt.Println("Build completed successfully!")
+		fmt.Printf("  User image: %s\n", build.UserImageDigest)
+		fmt.Printf("  Test image: %s\n", build.TestImageDigest)
+		fmt.Printf("  Signed:     %v\n", build.Signed)
+		fmt.Println()
+		fmt.Printf("To publish: kagento task publish %s --build-id=%s\n", dir, buildID)
+		return
+	case "failed":
+		fmt.Fprintf(os.Stderr, "\nBuild failed: %s\n", build.Error)
+		os.Exit(1)
 	}
 }
 

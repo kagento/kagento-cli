@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/kagento/kagento-cli/internal/auth"
 	"github.com/spf13/cobra"
 )
 
@@ -35,13 +36,22 @@ func runAuth(cmd *cobra.Command, args []string) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	if cl.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+cl.Token)
-	} else if cl.AdminSecret != "" {
+	if cl.AdminSecret != "" {
 		req.Header.Set("Authorization", "Bearer "+cl.AdminSecret)
 	} else {
-		fmt.Fprintln(os.Stderr, "Error: Set KAGENTO_TOKEN or KAGENTO_ADMIN_SECRET")
-		os.Exit(1)
+		token := cl.Token
+		if !cl.StaticToken {
+			refreshedToken, err := auth.GetValidToken()
+			if err == nil && refreshedToken != "" {
+				token = refreshedToken
+				cl.Token = refreshedToken
+			}
+		}
+		if token == "" {
+			fmt.Fprintln(os.Stderr, "Error: run 'kagento login' first or set KAGENTO_TOKEN / KAGENTO_ADMIN_SECRET")
+			os.Exit(1)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	resp, err := http.DefaultClient.Do(req)

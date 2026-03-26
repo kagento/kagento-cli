@@ -83,16 +83,30 @@ func Delete() error {
 
 // GetValidToken returns a valid access token, refreshing if needed.
 func GetValidToken() (string, error) {
+	return loadToken(false)
+}
+
+// ForceRefreshToken refreshes the saved access token even if the current one
+// has not reached its local expiry threshold yet.
+func ForceRefreshToken() (string, error) {
+	return loadToken(true)
+}
+
+func loadToken(forceRefresh bool) (string, error) {
 	creds, err := Load()
 	if err != nil {
 		return "", err
 	}
 
 	// If token is still valid (with 30s buffer), return it.
-	if time.Now().Unix() < creds.ExpiresAt-30 {
+	if !forceRefresh && time.Now().Unix() < creds.ExpiresAt-30 {
 		return creds.AccessToken, nil
 	}
 
+	return refreshToken(creds)
+}
+
+func refreshToken(creds *Credentials) (string, error) {
 	// Token expired — try to refresh via Supabase.
 	if creds.RefreshToken == "" {
 		return "", fmt.Errorf("token expired and no refresh token available")
@@ -142,6 +156,9 @@ func GetValidToken() (string, error) {
 		RefreshToken: tokenResp.RefreshToken,
 		ExpiresAt:    time.Now().Unix() + tokenResp.ExpiresIn,
 		ServerURL:    creds.ServerURL,
+	}
+	if newCreds.RefreshToken == "" {
+		newCreds.RefreshToken = creds.RefreshToken
 	}
 	if err := Save(newCreds); err != nil {
 		return "", fmt.Errorf("save refreshed credentials: %w", err)

@@ -9,16 +9,19 @@ type Client struct {
 	BackendURL  string // KAGENTO_BACKEND
 	Registry    string // KAGENTO_REGISTRY
 	Token       string // KAGENTO_TOKEN
+	StaticToken bool   // token came from KAGENTO_TOKEN and should not be refreshed
 	AdminSecret string // KAGENTO_ADMIN_SECRET
 	UserID      string // KAGENTO_USER_ID
 }
 
 // NewClientFromEnv creates a Client populated from environment variables.
 func NewClientFromEnv() *Client {
+	token := os.Getenv("KAGENTO_TOKEN")
 	return &Client{
 		BackendURL:  envOr("KAGENTO_BACKEND", "https://kagento.io"),
 		Registry:    envOr("KAGENTO_REGISTRY", "registry.kagento.io"),
-		Token:       os.Getenv("KAGENTO_TOKEN"),
+		Token:       token,
+		StaticToken: token != "",
 		AdminSecret: os.Getenv("KAGENTO_ADMIN_SECRET"),
 		UserID:      os.Getenv("KAGENTO_USER_ID"),
 	}
@@ -29,15 +32,4 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
-}
-
-// headers returns auth headers based on token or admin secret.
-func (c *Client) headers() map[string]string {
-	h := make(map[string]string)
-	if c.Token != "" {
-		h["Authorization"] = "Bearer " + c.Token
-	} else if c.AdminSecret != "" {
-		h["Authorization"] = "Bearer " + c.AdminSecret
-	}
-	return h
 }

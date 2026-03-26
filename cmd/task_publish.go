@@ -3,17 +3,18 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 )
 
 var (
-	draftFlag  bool
+	draftFlag   bool
 	buildIDFlag string
 )
 
 var taskPublishCmd = &cobra.Command{
-	Use:   "publish",
+	Use:   "publish [path]",
 	Short: "Publish a completed build as a task on the platform",
 	Long: `Promotes a completed server-side build to a published (or draft) task.
 Requires a --build-id from a successful 'kagento task submit'.`,
@@ -28,17 +29,28 @@ func init() {
 }
 
 func runTaskPublish(cmd *cobra.Command, args []string) {
-	// The user must provide task metadata. Read from task.yaml if a path is given,
-	// otherwise require a path argument.
-	dir := "."
+	dir := ""
 	if len(args) > 0 {
 		dir = args[0]
 	}
 
-	cfg, err := loadTaskConfig(dir)
+	build, err := waitForBuildCompletion(cl, buildIDFlag, 3*time.Second, os.Stdout, os.Stderr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error checking build: %v\n", err)
+		os.Exit(1)
+	}
+	if build.Status == "failed" {
+		fmt.Fprintf(os.Stderr, "Build failed: %s\n", build.Error)
+		os.Exit(1)
+	}
+
+	resolvedDir, cfg, autoDiscovered, err := resolvePublishTaskConfig(buildIDFlag, build.Slug, dir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
+	}
+	if autoDiscovered {
+		fmt.Printf("Using task metadata from %s\n", resolvedDir)
 	}
 
 	status := "published"

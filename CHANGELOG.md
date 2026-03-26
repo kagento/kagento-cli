@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.1](https://github.com/kagento/kagento-cli/compare/v1.4.0...v1.4.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* refresh saved auth tokens during long-running task submit and publish flows
+* retry transient build status failures and auto-discover task metadata for publish
+
 ## [1.4.0](https://github.com/kagento/kagento-cli/compare/v1.3.0...v1.4.0) (2026-03-25)
 
 

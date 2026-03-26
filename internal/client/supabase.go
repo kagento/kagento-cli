@@ -19,18 +19,19 @@ func (c *Client) SupabaseGet(path string) ([]byte, error) {
 	supabaseURL := envOr("SUPABASE_URL", defaultSupabaseURL)
 	url := strings.TrimRight(supabaseURL, "/") + path
 
-	req, err := http.NewRequest("GET", url, nil)
+	resp, err := c.doWithAuthRetry(func(forceRefresh bool) (*http.Request, error) {
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("apikey", supabaseAnonKey)
+		if err := c.setAuthHeader(req, forceRefresh); err != nil {
+			return nil, err
+		}
+		return req, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("apikey", supabaseAnonKey)
-	if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 
@@ -56,20 +57,21 @@ func (c *Client) SupabasePatch(path string, body map[string]interface{}) ([]byte
 		return nil, fmt.Errorf("marshal body: %w", err)
 	}
 
-	req, err := http.NewRequest("PATCH", url, strings.NewReader(string(data)))
+	resp, err := c.doWithAuthRetry(func(forceRefresh bool) (*http.Request, error) {
+		req, err := http.NewRequest("PATCH", url, strings.NewReader(string(data)))
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("apikey", supabaseAnonKey)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Prefer", "return=minimal")
+		if err := c.setAuthHeader(req, forceRefresh); err != nil {
+			return nil, err
+		}
+		return req, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("apikey", supabaseAnonKey)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Prefer", "return=minimal")
-	if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 
@@ -95,20 +97,21 @@ func (c *Client) SupabasePost(path string, body map[string]interface{}) ([]byte,
 		return nil, fmt.Errorf("marshal body: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", url, strings.NewReader(string(data)))
+	resp, err := c.doWithAuthRetry(func(forceRefresh bool) (*http.Request, error) {
+		req, err := http.NewRequest("POST", url, strings.NewReader(string(data)))
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("apikey", supabaseAnonKey)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Prefer", "return=representation")
+		if err := c.setAuthHeader(req, forceRefresh); err != nil {
+			return nil, err
+		}
+		return req, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("apikey", supabaseAnonKey)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Prefer", "return=representation")
-	if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 

@@ -279,27 +279,28 @@ func (c *Client) ArchiveTask(slug string) error {
 
 // backendPost sends a POST request to the backend API.
 func (c *Client) backendPost(path string, body interface{}) ([]byte, error) {
-	var reqBody io.Reader
+	var data []byte
 	if body != nil {
-		data, err := json.Marshal(body)
+		var err error
+		data, err = json.Marshal(body)
 		if err != nil {
 			return nil, fmt.Errorf("marshal request: %w", err)
 		}
-		reqBody = bytes.NewReader(data)
 	}
 
-	req, err := http.NewRequest("POST", c.BackendURL+path, reqBody)
+	resp, err := c.doWithAuthRetry(func(forceRefresh bool) (*http.Request, error) {
+		req, err := http.NewRequest("POST", c.BackendURL+path, bytes.NewReader(data))
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if err := c.setAuthHeader(req, forceRefresh); err != nil {
+			return nil, err
+		}
+		return req, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	for k, v := range c.headers() {
-		req.Header.Set(k, v)
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 
@@ -347,17 +348,18 @@ func (c *Client) GetKubeconfig(sessionID string) ([]byte, error) {
 
 // BackendGet sends a GET request to the backend API.
 func (c *Client) BackendGet(path string) ([]byte, error) {
-	req, err := http.NewRequest("GET", c.BackendURL+path, nil)
+	resp, err := c.doWithAuthRetry(func(forceRefresh bool) (*http.Request, error) {
+		req, err := http.NewRequest("GET", c.BackendURL+path, nil)
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		if err := c.setAuthHeader(req, forceRefresh); err != nil {
+			return nil, err
+		}
+		return req, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	for k, v := range c.headers() {
-		req.Header.Set(k, v)
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 

@@ -215,6 +215,7 @@ var allowedK8sKinds = map[string]bool{
 	"Role": true, "RoleBinding": true, "ClusterRole": true, "ClusterRoleBinding": true,
 	"HorizontalPodAutoscaler": true, "PersistentVolumeClaim": true,
 	"ServiceAccount": true, "Namespace": true, "LimitRange": true, "ResourceQuota": true,
+	"PodDisruptionBudget": true,
 }
 
 func validateK8sManifest(data []byte, path string) []string {

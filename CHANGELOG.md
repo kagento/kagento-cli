@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/kagento/kagento-cli/compare/v1.5.0...v1.6.0) (2026-03-28)
+
+
+### Features
+
+* add `kagento start` command to create sessions from CLI ([3d48bb9](https://github.com/kagento/kagento-cli/commit/3d48bb9df1724b52bee7b3bde71bc1b841d4acb9))
+
 ## [1.5.0](https://github.com/kagento/kagento-cli/compare/v1.4.1...v1.5.0) (2026-03-26)
 
 

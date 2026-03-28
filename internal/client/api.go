@@ -217,6 +217,21 @@ func UploadToPresignedURL(url string, data io.Reader, contentLength int64) error
 	return nil
 }
 
+// StartSession creates a new session for a task via the backend API.
+func (c *Client) StartSession(taskSlug string) (map[string]interface{}, error) {
+	resp, err := c.BackendPost("/api/sessions/start", map[string]string{
+		"task_slug": taskSlug,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("parse start session response: %w", err)
+	}
+	return result, nil
+}
+
 // GetSessionStatus fetches session status via Supabase PostgREST.
 func (c *Client) GetSessionStatus(sessionID string) (map[string]interface{}, error) {
 	resp, err := c.SupabaseGet(
@@ -272,24 +287,22 @@ func (c *Client) GetSessionSubmission(sessionID string) (map[string]interface{},
 	return rows[0], nil
 }
 
-// CreateCheck creates a new check for a session via Supabase and returns the check ID.
+// CreateCheck creates a new check for a session via the backend API and returns the check ID.
 func (c *Client) CreateCheck(sessionID string) (string, error) {
-	resp, err := c.SupabasePost("/rest/v1/checks", map[string]interface{}{
-		"session_id": sessionID,
-	})
+	resp, err := c.BackendPost("/api/sessions/"+sessionID+"/check", nil)
 	if err != nil {
 		return "", err
 	}
-	var rows []struct {
+	var result struct {
 		ID string `json:"id"`
 	}
-	if err := json.Unmarshal(resp, &rows); err != nil {
+	if err := json.Unmarshal(resp, &result); err != nil {
 		return "", fmt.Errorf("parse check: %w", err)
 	}
-	if len(rows) == 0 {
+	if result.ID == "" {
 		return "", fmt.Errorf("failed to create check")
 	}
-	return rows[0].ID, nil
+	return result.ID, nil
 }
 
 // GetCheckStatus fetches check status via Supabase PostgREST.
@@ -444,6 +457,44 @@ func (c *Client) BackendGet(path string) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("create request: %w", err)
 		}
+		if err := c.setAuthHeader(req, forceRefresh); err != nil {
+			return nil, err
+		}
+		return req, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return respBody, nil
+}
+
+// BackendPost sends a POST request to the backend API.
+func (c *Client) BackendPost(path string, body interface{}) ([]byte, error) {
+	resp, err := c.doWithAuthRetry(func(forceRefresh bool) (*http.Request, error) {
+		var reqBody io.Reader
+		if body != nil {
+			data, err := json.Marshal(body)
+			if err != nil {
+				return nil, fmt.Errorf("marshal body: %w", err)
+			}
+			reqBody = bytes.NewReader(data)
+		}
+		req, err := http.NewRequest("POST", c.BackendURL+path, reqBody)
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
 		if err := c.setAuthHeader(req, forceRefresh); err != nil {
 			return nil, err
 		}

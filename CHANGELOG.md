@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.2](https://github.com/kagento/kagento-cli/compare/v1.6.1...v1.6.2) (2026-03-28)
+
+
+### Bug Fixes
+
+* route FinishSession through backend API instead of Supabase ([ef5ff4e](https://github.com/kagento/kagento-cli/commit/ef5ff4ec7d072f89f96ebbd38b933e80c49b85fc))
+
 ## [1.6.1](https://github.com/kagento/kagento-cli/compare/v1.6.0...v1.6.1) (2026-03-28)
 
 

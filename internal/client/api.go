@@ -257,13 +257,10 @@ func (c *Client) GetSessionStatus(sessionID string) (map[string]interface{}, err
 	return row, nil
 }
 
-// FinishSession triggers the finish flow by setting session status to "finishing" via Supabase.
-// The backend event handler picks up the status change and runs tests.
+// FinishSession triggers the finish flow via the backend API.
+// The backend sets status to "finishing" and the event handler runs tests.
 func (c *Client) FinishSession(sessionID string) error {
-	_, err := c.SupabasePatch(
-		"/rest/v1/sessions?id=eq."+sessionID+"&status=in.(ready,running)",
-		map[string]interface{}{"status": "finishing"},
-	)
+	_, err := c.BackendPost("/api/sessions/"+sessionID+"/finish", nil)
 	return err
 }
 

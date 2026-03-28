@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1](https://github.com/kagento/kagento-cli/compare/v1.6.0...v1.6.1) (2026-03-28)
+
+
+### Bug Fixes
+
+* allow PodDisruptionBudget in vcluster task manifests ([50663cd](https://github.com/kagento/kagento-cli/commit/50663cd5b2c4c6e9a3790568cb74e9190df9848e))
+
 ## [1.6.0](https://github.com/kagento/kagento-cli/compare/v1.5.0...v1.6.0) (2026-03-28)
 
 

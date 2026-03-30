@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/kagento/kagento-cli/compare/v1.6.3...v1.7.0) (2026-03-30)
+
+
+### Features
+
+* mirror task images to scoped registry during vcluster task submit ([c0aeb00](https://github.com/kagento/kagento-cli/commit/c0aeb0096ea4485bf000ce1b6eb228a860c25cda))
+
 ## [1.6.3](https://github.com/kagento/kagento-cli/compare/v1.6.2...v1.6.3) (2026-03-30)
 
 

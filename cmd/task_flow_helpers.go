@@ -177,11 +177,15 @@ func publishTaskDir(dirOrSlug string, opts publishTaskOptions) taskActionResult 
 }
 
 func publishVclusterTask(dir string, cfg *TaskConfig, draft bool) (string, string, error) {
-	mirror, err := newTaskImageMirror(cfg.Slug)
-	if err != nil {
-		return "", "", err
+	// Image mirroring is best-effort — if the registry isn't set up yet,
+	// fall through and publish with original image refs.
+	mirror, mirrorErr := newTaskImageMirror(cfg.Slug)
+	if mirrorErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: image mirroring unavailable (%v), using original image refs\n", mirrorErr)
 	}
-	defer mirror.Close()
+	if mirror != nil {
+		defer mirror.Close()
+	}
 
 	var manifests []json.RawMessage
 	for _, manifestPath := range cfg.Provision.Manifests {
@@ -193,11 +197,15 @@ func publishVclusterTask(dir string, cfg *TaskConfig, draft bool) (string, strin
 		if err != nil {
 			return "", "", fmt.Errorf("read manifest %s: %w", manifestPath, err)
 		}
-		rewritten, err := rewriteManifestImages(data, mirror)
-		if err != nil {
-			return "", "", fmt.Errorf("rewrite manifest %s: %w", manifestPath, err)
+		if mirror != nil {
+			rewritten, err := rewriteManifestImages(data, mirror)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to mirror images in %s: %v\n", manifestPath, err)
+			} else {
+				data = rewritten
+			}
 		}
-		encoded, _ := json.Marshal(string(rewritten))
+		encoded, _ := json.Marshal(string(data))
 		manifests = append(manifests, encoded)
 	}
 

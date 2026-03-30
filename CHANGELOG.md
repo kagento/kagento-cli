@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.1](https://github.com/kagento/kagento-cli/compare/v1.7.0...v1.7.1) (2026-03-30)
+
+
+### Bug Fixes
+
+* make image mirroring best-effort during vcluster task publish ([30876ce](https://github.com/kagento/kagento-cli/commit/30876cec43148da761e9dcc0b240d6650be6e6aa))
+
 ## [1.7.0](https://github.com/kagento/kagento-cli/compare/v1.6.3...v1.7.0) (2026-03-30)
 
 

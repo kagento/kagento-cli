@@ -20,6 +20,9 @@ go install github.com/kagento/kagento-cli@latest
 # Log in (opens browser for OAuth)
 kagento login
 
+# Start a session (creates session, waits for ready, saves kubeconfig)
+kagento start <task-slug>
+
 # During a session, check your progress
 kagento check <session_id>
 
@@ -50,8 +53,9 @@ kagento task builds example-task
 | `kagento login` | Log in via browser (OAuth 2.0 device flow) |
 | `kagento logout` | Clear saved credentials |
 | `kagento whoami [--json]` | Show current user |
+| `kagento start <task-slug>` | Create a session, wait for ready, and save kubeconfig |
 | `kagento check <session_id>` | Run tests and preview your score without ending the session |
-| `kagento submit <session_id>` | Submit your solution -- runs final tests, stops the session, records your score |
+| `kagento submit <session_id>` | Submit your solution -- runs final tests, stops the session (FinishSession via backend API), records your score |
 | `kagento status <session_id> [--json]` | Show session status, task name, and timing |
 | `kagento self-update [--check]` | Check for or install a newer CLI release |
 | `kagento auth` | Authenticate with the Docker registry (for task authors) |
@@ -81,6 +85,12 @@ $ kagento login
 Open https://kagento.io/... and enter code: ABCD-EFGH
 Waiting for login...
 Logged in as alice
+
+$ kagento start rate-limiter
+Creating session for rate-limiter...
+Waiting for session to be ready...
+Session: 8f3a...c1d2
+Kubeconfig saved to ./kubeconfig.yaml
 
 $ kagento status 8f3a...c1d2
 Session: 8f3a...c1d2

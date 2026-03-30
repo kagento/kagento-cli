@@ -10,9 +10,11 @@ import (
 func TestBackendGetRefreshesTokenAfterUnauthorized(t *testing.T) {
 	oldGetValidToken := getValidToken
 	oldForceRefreshToken := forceRefreshToken
+	oldDefaultClient := http.DefaultClient
 	defer func() {
 		getValidToken = oldGetValidToken
 		forceRefreshToken = oldForceRefreshToken
+		http.DefaultClient = oldDefaultClient
 	}()
 
 	getCalls := 0
@@ -27,7 +29,7 @@ func TestBackendGetRefreshesTokenAfterUnauthorized(t *testing.T) {
 	}
 
 	requests := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	http.DefaultClient = &http.Client{Transport: testRoundTripper{handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
 		switch requests {
 		case 1:
@@ -43,10 +45,9 @@ func TestBackendGetRefreshesTokenAfterUnauthorized(t *testing.T) {
 		default:
 			t.Fatalf("unexpected request #%d", requests)
 		}
-	}))
-	defer srv.Close()
+	})}}
 
-	c := &Client{BackendURL: srv.URL}
+	c := &Client{BackendURL: "http://backend.test"}
 	resp, err := c.BackendGet("/api/builds/demo")
 	if err != nil {
 		t.Fatalf("BackendGet returned error: %v", err)
@@ -65,9 +66,11 @@ func TestBackendGetRefreshesTokenAfterUnauthorized(t *testing.T) {
 func TestBackendGetDoesNotRetryStaticToken(t *testing.T) {
 	oldGetValidToken := getValidToken
 	oldForceRefreshToken := forceRefreshToken
+	oldDefaultClient := http.DefaultClient
 	defer func() {
 		getValidToken = oldGetValidToken
 		forceRefreshToken = oldForceRefreshToken
+		http.DefaultClient = oldDefaultClient
 	}()
 
 	getValidToken = func() (string, error) {
@@ -80,16 +83,15 @@ func TestBackendGetDoesNotRetryStaticToken(t *testing.T) {
 	}
 
 	requests := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	http.DefaultClient = &http.Client{Transport: testRoundTripper{handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
 		if got := r.Header.Get("Authorization"); got != "Bearer env-token" {
 			t.Fatalf("auth header = %q", got)
 		}
 		http.Error(w, `{"message":"invalid token"}`, http.StatusUnauthorized)
-	}))
-	defer srv.Close()
+	})}}
 
-	c := &Client{BackendURL: srv.URL, Token: "env-token", StaticToken: true}
+	c := &Client{BackendURL: "http://backend.test", Token: "env-token", StaticToken: true}
 	_, err := c.BackendGet("/api/builds/demo")
 	if err == nil {
 		t.Fatal("expected BackendGet to fail")
@@ -97,4 +99,14 @@ func TestBackendGetDoesNotRetryStaticToken(t *testing.T) {
 	if requests != 1 {
 		t.Fatalf("requests = %d, want 1", requests)
 	}
+}
+
+type testRoundTripper struct {
+	handler http.Handler
+}
+
+func (rt testRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	rec := httptest.NewRecorder()
+	rt.handler.ServeHTTP(rec, req)
+	return rec.Result(), nil
 }

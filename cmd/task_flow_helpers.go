@@ -3,11 +3,14 @@ package cmd
 import (
 	"archive/tar"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -15,6 +18,7 @@ import (
 	"time"
 
 	"github.com/kagento/kagento-cli/internal/client"
+	"gopkg.in/yaml.v3"
 )
 
 type submitTaskOptions struct {
@@ -173,6 +177,12 @@ func publishTaskDir(dirOrSlug string, opts publishTaskOptions) taskActionResult 
 }
 
 func publishVclusterTask(dir string, cfg *TaskConfig, draft bool) (string, string, error) {
+	mirror, err := newTaskImageMirror(cfg.Slug)
+	if err != nil {
+		return "", "", err
+	}
+	defer mirror.Close()
+
 	var manifests []json.RawMessage
 	for _, manifestPath := range cfg.Provision.Manifests {
 		fullPath := manifestPath
@@ -183,7 +193,11 @@ func publishVclusterTask(dir string, cfg *TaskConfig, draft bool) (string, strin
 		if err != nil {
 			return "", "", fmt.Errorf("read manifest %s: %w", manifestPath, err)
 		}
-		encoded, _ := json.Marshal(string(data))
+		rewritten, err := rewriteManifestImages(data, mirror)
+		if err != nil {
+			return "", "", fmt.Errorf("rewrite manifest %s: %w", manifestPath, err)
+		}
+		encoded, _ := json.Marshal(string(rewritten))
 		manifests = append(manifests, encoded)
 	}
 
@@ -219,6 +233,273 @@ func publishVclusterTask(dir string, cfg *TaskConfig, draft bool) (string, strin
 		return "", "", err
 	}
 	return fmt.Sprint(result["task_id"]), fmt.Sprint(result["status"]), nil
+}
+
+type taskImageMirror struct {
+	slug          string
+	dockerConfig  string
+	loginOnce     sync.Once
+	loginErr      error
+	mirrored      map[string]string
+	repoOwners    map[string]string
+	repositoryRef string
+}
+
+func newTaskImageMirror(slug string) (*taskImageMirror, error) {
+	dockerConfig, err := os.MkdirTemp("", "kagento-registry-*")
+	if err != nil {
+		return nil, fmt.Errorf("create docker config dir: %w", err)
+	}
+
+	return &taskImageMirror{
+		slug:         slug,
+		dockerConfig: dockerConfig,
+		mirrored:     make(map[string]string),
+		repoOwners:   make(map[string]string),
+	}, nil
+}
+
+func (m *taskImageMirror) Close() {
+	if m == nil || m.dockerConfig == "" {
+		return
+	}
+	_ = os.RemoveAll(m.dockerConfig)
+}
+
+func rewriteManifestImages(data []byte, mirror *taskImageMirror) ([]byte, error) {
+	var manifest any
+	if err := yaml.Unmarshal(data, &manifest); err != nil {
+		return nil, err
+	}
+
+	rewritten, err := rewriteManifestNode(manifest, mirror)
+	if err != nil {
+		return nil, err
+	}
+
+	return yaml.Marshal(rewritten)
+}
+
+func rewriteManifestNode(node any, mirror *taskImageMirror) (any, error) {
+	switch typed := node.(type) {
+	case map[string]any:
+		for key, value := range typed {
+			if key == "image" {
+				image, ok := value.(string)
+				if !ok || !shouldMirrorTaskImage(image, mirror.slug) {
+					continue
+				}
+				rewritten, err := mirror.Mirror(image)
+				if err != nil {
+					return nil, err
+				}
+				typed[key] = rewritten
+				continue
+			}
+
+			rewritten, err := rewriteManifestNode(value, mirror)
+			if err != nil {
+				return nil, err
+			}
+			typed[key] = rewritten
+		}
+		return typed, nil
+	case map[any]any:
+		for key, value := range typed {
+			keyStr, _ := key.(string)
+			if keyStr == "image" {
+				image, ok := value.(string)
+				if !ok || !shouldMirrorTaskImage(image, mirror.slug) {
+					continue
+				}
+				rewritten, err := mirror.Mirror(image)
+				if err != nil {
+					return nil, err
+				}
+				typed[key] = rewritten
+				continue
+			}
+
+			rewritten, err := rewriteManifestNode(value, mirror)
+			if err != nil {
+				return nil, err
+			}
+			typed[key] = rewritten
+		}
+		return typed, nil
+	case []any:
+		for i, value := range typed {
+			rewritten, err := rewriteManifestNode(value, mirror)
+			if err != nil {
+				return nil, err
+			}
+			typed[i] = rewritten
+		}
+		return typed, nil
+	default:
+		return node, nil
+	}
+}
+
+func shouldMirrorTaskImage(image, slug string) bool {
+	image = strings.TrimSpace(image)
+	if image == "" {
+		return false
+	}
+	return !strings.HasPrefix(image, cl.Registry+"/tasks/"+slug+"/")
+}
+
+func (m *taskImageMirror) Mirror(source string) (string, error) {
+	if rewritten, ok := m.mirrored[source]; ok {
+		return rewritten, nil
+	}
+
+	if err := m.ensureRegistryLogin(); err != nil {
+		return "", err
+	}
+
+	target, err := m.destinationReference(source)
+	if err != nil {
+		return "", err
+	}
+
+	if err := runDockerCommand(m.dockerConfig, "pull", source); err != nil {
+		return "", fmt.Errorf("pull %s: %w", source, err)
+	}
+	if err := runDockerCommand(m.dockerConfig, "tag", source, target); err != nil {
+		return "", fmt.Errorf("tag %s -> %s: %w", source, target, err)
+	}
+	if err := runDockerCommand(m.dockerConfig, "push", target); err != nil {
+		return "", fmt.Errorf("push %s: %w", target, err)
+	}
+
+	m.mirrored[source] = target
+	return target, nil
+}
+
+func (m *taskImageMirror) ensureRegistryLogin() error {
+	m.loginOnce.Do(func() {
+		respBody, err := cl.BackendPost("/api/registry/token", map[string]any{
+			"scope":     "task",
+			"task_slug": m.slug,
+			"actions":   []string{"pull", "push"},
+		})
+		if err != nil {
+			m.loginErr = fmt.Errorf("request task registry token: %w", err)
+			return
+		}
+
+		var creds struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+			Registry string `json:"registry"`
+		}
+		if err := json.Unmarshal(respBody, &creds); err != nil {
+			m.loginErr = fmt.Errorf("parse task registry token response: %w", err)
+			return
+		}
+
+		m.repositoryRef = creds.Registry
+		if err := runDockerCommandWithInput(m.dockerConfig, creds.Password, "login", creds.Registry, "-u", creds.Username, "--password-stdin"); err != nil {
+			m.loginErr = fmt.Errorf("docker login %s: %w", creds.Registry, err)
+		}
+	})
+	return m.loginErr
+}
+
+func (m *taskImageMirror) destinationReference(source string) (string, error) {
+	ref, err := parseMirrorSourceImage(source)
+	if err != nil {
+		return "", err
+	}
+
+	repoParts := strings.Split(ref.RepositoryPath, "/")
+	repoName := repoParts[len(repoParts)-1]
+	if owner, ok := m.repoOwners[repoName]; ok && owner != ref.RepositoryPath {
+		repoName = repoName + "-" + shortImageHash(ref.RepositoryPath)
+	}
+	m.repoOwners[repoName] = ref.RepositoryPath
+
+	registry := m.repositoryRef
+	if registry == "" {
+		registry = cl.Registry
+	}
+	return fmt.Sprintf("%s/tasks/%s/%s:%s", registry, m.slug, repoName, ref.Tag), nil
+}
+
+func sanitizeDigestTag(digest string) string {
+	digest = strings.ReplaceAll(digest, ":", "-")
+	digest = strings.ReplaceAll(digest, "@", "-")
+	return digest
+}
+
+func shortImageHash(input string) string {
+	sum := sha256.Sum256([]byte(input))
+	return hex.EncodeToString(sum[:])[:10]
+}
+
+type mirroredImageRef struct {
+	RepositoryPath string
+	Tag            string
+}
+
+func parseMirrorSourceImage(source string) (mirroredImageRef, error) {
+	raw := strings.TrimSpace(source)
+	if raw == "" {
+		return mirroredImageRef{}, fmt.Errorf("image reference is empty")
+	}
+
+	tag := "latest"
+	if at := strings.Index(raw, "@"); at >= 0 {
+		tag = sanitizeDigestTag(raw[at+1:])
+		raw = raw[:at]
+	} else {
+		lastSlash := strings.LastIndex(raw, "/")
+		lastColon := strings.LastIndex(raw, ":")
+		if lastColon > lastSlash {
+			tag = raw[lastColon+1:]
+			raw = raw[:lastColon]
+		}
+	}
+
+	if raw == "" {
+		return mirroredImageRef{}, fmt.Errorf("invalid image reference %q", source)
+	}
+
+	parts := strings.Split(raw, "/")
+	if len(parts) > 1 && isRegistryHostSegment(parts[0]) {
+		parts = parts[1:]
+	}
+	repositoryPath := strings.Join(parts, "/")
+	if repositoryPath == "" {
+		return mirroredImageRef{}, fmt.Errorf("invalid image reference %q", source)
+	}
+
+	return mirroredImageRef{
+		RepositoryPath: repositoryPath,
+		Tag:            tag,
+	}, nil
+}
+
+func isRegistryHostSegment(segment string) bool {
+	return strings.Contains(segment, ".") || strings.Contains(segment, ":") || segment == "localhost"
+}
+
+func runDockerCommand(configDir string, args ...string) error {
+	return runDockerCommandWithInput(configDir, "", args...)
+}
+
+func runDockerCommandWithInput(configDir string, input string, args ...string) error {
+	cmdArgs := append([]string{"--config", configDir}, args...)
+	cmd := exec.Command("docker", cmdArgs...)
+	if input != "" {
+		cmd.Stdin = strings.NewReader(input)
+	}
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 func publishContainerBuild(buildID string, cfg *TaskConfig, draft bool) (string, string, error) {

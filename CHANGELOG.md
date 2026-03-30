@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.3](https://github.com/kagento/kagento-cli/compare/v1.6.2...v1.6.3) (2026-03-30)
+
+
+### Bug Fixes
+
+* check command waits for 'running' status to complete ([5b08d4f](https://github.com/kagento/kagento-cli/commit/5b08d4fabaedf8b52093442500dbed7ea1d750e0))
+
 ## [1.6.2](https://github.com/kagento/kagento-cli/compare/v1.6.1...v1.6.2) (2026-03-28)
 
 

@@ -54,7 +54,7 @@ func runCheck(cmd *cobra.Command, args []string) {
 			}
 
 			status, _ := result["status"].(string)
-			if status == "pending" {
+			if status == "pending" || status == "running" {
 				fmt.Print(".")
 				continue
 			}

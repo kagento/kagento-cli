@@ -65,7 +65,7 @@ kagento task builds example-task
 | Command | Description |
 |---------|-------------|
 | `kagento task validate <path>` | Validate `task.yaml` and required files |
-| `kagento task submit <path>` | Submit a task for server-side building |
+| `kagento task submit <path>` | Submit a task for server-side building (vCluster tasks: mirrors manifest images to internal registry) |
 | `kagento task submit --all tasks/ --jobs 4 --publish` | Batch submit and publish multiple tasks with bounded parallelism |
 | `kagento task publish <path-or-slug> --latest` | Publish the latest completed build for a task |
 | `kagento task builds [slug-or-path]` | List your recent builds |

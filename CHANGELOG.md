@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.8.0](https://github.com/kagento/kagento-cli/compare/v1.7.1...v1.8.0) (2026-04-06)
+
+
+### Features
+
+* remove declarative check validation from CLI ([a5b9700](https://github.com/kagento/kagento-cli/commit/a5b97009e0ecafddb7c2ac53d5a199145e5070e4))
+* vcluster task submit now builds test image via server pipeline ([222003a](https://github.com/kagento/kagento-cli/commit/222003a233b792b59574da9113d44c13d1557231))
+
+
+### Bug Fixes
+
+* preserve multi-arch manifests during image mirroring ([aab5649](https://github.com/kagento/kagento-cli/commit/aab5649ee008f489dd441b54f0bccb4e93ff6f94))
+
 ## [1.7.1](https://github.com/kagento/kagento-cli/compare/v1.7.0...v1.7.1) (2026-03-30)
 
 

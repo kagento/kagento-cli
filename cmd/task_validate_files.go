@@ -179,7 +179,7 @@ func validateVclusterTask(dir string, cfg *TaskConfig) []string {
 	testDockerfile := filepath.Join(dir, "test", "Dockerfile")
 	if fileExists(testDockerfile) {
 		errs = append(errs, validateDockerfile(testDockerfile, "test")...)
-	} else if info, err := os.Stat(filepath.Join(dir, "test")); err == nil && info.IsDir() {
+	} else {
 		errs = append(errs, "vcluster task scoring image must be defined by test/Dockerfile")
 	}
 

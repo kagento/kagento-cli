@@ -59,7 +59,24 @@ func submitTaskDir(dir string, opts submitTaskOptions) taskActionResult {
 	}
 
 	if cfg.EnvironmentType == "vcluster" {
-		taskID, status, err := publishVclusterTask(dir, cfg, opts.Draft)
+		build, reused, err := ensureTaskBuild(dir, cfg, opts.Resume, opts.Stream)
+		if err != nil {
+			result.Error = err.Error()
+			return result
+		}
+		result.BuildID = build.ID
+		result.BuildStatus = build.Status
+		result.ReusedBuild = reused
+		if build.Status == "failed" {
+			if build.Error != "" {
+				result.Error = build.Error
+			} else {
+				result.Error = "build failed"
+			}
+			return result
+		}
+
+		taskID, status, err := publishVclusterTask(dir, cfg, build.TestImageDigest, opts.Draft)
 		if err != nil {
 			result.Error = err.Error()
 			return result
@@ -183,7 +200,11 @@ func publishTaskDir(dirOrSlug string, opts publishTaskOptions) taskActionResult 
 	}
 }
 
-func publishVclusterTask(dir string, cfg *TaskConfig, draft bool) (string, string, error) {
+func publishVclusterTask(dir string, cfg *TaskConfig, testImage string, draft bool) (string, string, error) {
+	if strings.TrimSpace(testImage) == "" {
+		return "", "", fmt.Errorf("build did not produce a test image")
+	}
+
 	// Image mirroring is best-effort — if the registry isn't set up yet,
 	// fall through and publish with original image refs.
 	mirror, mirrorErr := newTaskImageMirror(cfg.Slug)
@@ -227,6 +248,7 @@ func publishVclusterTask(dir string, cfg *TaskConfig, draft bool) (string, strin
 		"time_limit_sec":      defaultTaskTimeLimit(cfg),
 		"scoring_type":        defaultScoringType(cfg),
 		"provision_manifests": manifests,
+		"test_image":          testImage,
 		"draft":               draft,
 	}
 	if cfg.ScoringConfig != nil {
@@ -690,7 +712,7 @@ func createSourceTar(dir string) (string, error) {
 	tw := tar.NewWriter(gw)
 	defer tw.Close()
 
-	dirs := []string{"user", "test", "solution"}
+	dirs := []string{"user", "test", "solution", "provision"}
 	files := []string{"task.yaml"}
 
 	for _, f := range files {

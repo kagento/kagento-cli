@@ -21,8 +21,9 @@ var taskSubmitCmd = &cobra.Command{
 	Short: "Submit a task for server-side building",
 	Long: `Validates the task directory, creates a tar archive, uploads it to the
 platform, and triggers a server-side build. Container tasks go through the full
-build pipeline (Kaniko, SBOM, scanning, signing). vcluster tasks are published
-directly from task.yaml metadata.`,
+build pipeline (Kaniko, SBOM, scanning, signing). vcluster tasks build their
+scoring image first, then publish the task manifests with the resulting
+test_image.`,
 	Args: cobra.MaximumNArgs(1),
 	Run:  runTaskSubmit,
 }
@@ -99,7 +100,11 @@ func runTaskSubmit(cmd *cobra.Command, args []string) {
 
 	fmt.Println()
 	if result.EnvironmentType == "vcluster" {
+		if result.ReusedBuild {
+			fmt.Printf("Reused build %s\n", result.BuildID)
+		}
 		fmt.Printf("Published task: %s\n", result.Slug)
+		fmt.Printf("  Build ID: %s\n", result.BuildID)
 		fmt.Printf("  Task ID: %s\n", result.TaskID)
 		fmt.Printf("  Status:  %s\n", result.PublishedStatus)
 		return

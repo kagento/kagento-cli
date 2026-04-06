@@ -35,6 +35,13 @@ type publishTaskOptions struct {
 	Stream  bool
 }
 
+var (
+	execLookPath                = exec.LookPath
+	runDockerCommandFunc        = runDockerCommand
+	runDockerCommandWithInputFn = runDockerCommandWithInput
+	runSkopeoCopyCommand        = skopeoCopyCommand
+)
+
 func submitTaskDir(dir string, opts submitTaskOptions) taskActionResult {
 	cfg, err := loadAndValidateTask(dir)
 	if err != nil {
@@ -371,18 +378,34 @@ func (m *taskImageMirror) Mirror(source string) (string, error) {
 		return "", err
 	}
 
-	if err := runDockerCommand(m.dockerConfig, "pull", source); err != nil {
-		return "", fmt.Errorf("pull %s: %w", source, err)
-	}
-	if err := runDockerCommand(m.dockerConfig, "tag", source, target); err != nil {
-		return "", fmt.Errorf("tag %s -> %s: %w", source, target, err)
-	}
-	if err := runDockerCommand(m.dockerConfig, "push", target); err != nil {
-		return "", fmt.Errorf("push %s: %w", target, err)
+	if err := m.copyImage(source, target); err != nil {
+		return "", err
 	}
 
 	m.mirrored[source] = target
 	return target, nil
+}
+
+func (m *taskImageMirror) copyImage(source, target string) error {
+	authFile := filepath.Join(m.dockerConfig, "config.json")
+	if _, err := execLookPath("skopeo"); err == nil {
+		if err := runSkopeoCopyCommand(authFile, source, target); err != nil {
+			return fmt.Errorf("skopeo copy %s -> %s: %w", source, target, err)
+		}
+		return nil
+	}
+
+	fmt.Fprintln(os.Stderr, "Warning: skopeo not found, falling back to docker pull/tag/push; only the local platform image will be mirrored")
+	if err := runDockerCommandFunc(m.dockerConfig, "pull", source); err != nil {
+		return fmt.Errorf("pull %s: %w", source, err)
+	}
+	if err := runDockerCommandFunc(m.dockerConfig, "tag", source, target); err != nil {
+		return fmt.Errorf("tag %s -> %s: %w", source, target, err)
+	}
+	if err := runDockerCommandFunc(m.dockerConfig, "push", target); err != nil {
+		return fmt.Errorf("push %s: %w", target, err)
+	}
+	return nil
 }
 
 func (m *taskImageMirror) ensureRegistryLogin() error {
@@ -408,7 +431,7 @@ func (m *taskImageMirror) ensureRegistryLogin() error {
 		}
 
 		m.repositoryRef = creds.Registry
-		if err := runDockerCommandWithInput(m.dockerConfig, creds.Password, "login", creds.Registry, "-u", creds.Username, "--password-stdin"); err != nil {
+		if err := runDockerCommandWithInputFn(m.dockerConfig, creds.Password, "login", creds.Registry, "-u", creds.Username, "--password-stdin"); err != nil {
 			m.loginErr = fmt.Errorf("docker login %s: %w", creds.Registry, err)
 		}
 	})
@@ -495,6 +518,21 @@ func isRegistryHostSegment(segment string) bool {
 
 func runDockerCommand(configDir string, args ...string) error {
 	return runDockerCommandWithInput(configDir, "", args...)
+}
+
+func skopeoCopyCommand(authFile, source, target string) error {
+	args := []string{"copy", "--all"}
+	if authFile != "" {
+		args = append(args, "--dest-authfile", authFile)
+	}
+	args = append(args, "docker://"+source, "docker://"+target)
+
+	cmd := exec.Command("skopeo", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 func runDockerCommandWithInput(configDir string, input string, args ...string) error {

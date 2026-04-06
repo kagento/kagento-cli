@@ -216,12 +216,6 @@ func publishVclusterTask(dir string, cfg *TaskConfig, draft bool) (string, strin
 		manifests = append(manifests, encoded)
 	}
 
-	var checks []json.RawMessage
-	for _, check := range cfg.Checks {
-		encoded, _ := json.Marshal(check)
-		checks = append(checks, encoded)
-	}
-
 	body := map[string]any{
 		"slug":                cfg.Slug,
 		"title":               cfg.Title,
@@ -233,7 +227,6 @@ func publishVclusterTask(dir string, cfg *TaskConfig, draft bool) (string, strin
 		"time_limit_sec":      defaultTaskTimeLimit(cfg),
 		"scoring_type":        defaultScoringType(cfg),
 		"provision_manifests": manifests,
-		"checks":              checks,
 		"draft":               draft,
 	}
 	if cfg.ScoringConfig != nil {

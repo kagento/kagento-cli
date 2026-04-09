@@ -116,7 +116,9 @@ func runSelfUpdate(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(os.Stderr, "Error downloading release: %v\n", err)
 		os.Exit(1)
 	}
-	defer os.Remove(archivePath)
+	defer func() {
+		_ = os.Remove(archivePath)
+	}()
 
 	binaryName := "kagento"
 	if runtime.GOOS == "windows" {
@@ -172,7 +174,9 @@ func fetchRelease(tag string) (*githubRelease, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -211,7 +215,9 @@ func downloadReleaseAsset(url string, assetName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
@@ -222,7 +228,9 @@ func downloadReleaseAsset(url string, assetName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer tmpFile.Close()
+	defer func() {
+		_ = tmpFile.Close()
+	}()
 
 	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
 		_ = os.Remove(tmpFile.Name())
@@ -243,13 +251,17 @@ func extractBinaryFromTarGz(archivePath string, binaryName string) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	gzReader, err := gzip.NewReader(file)
 	if err != nil {
 		return nil, err
 	}
-	defer gzReader.Close()
+	defer func() {
+		_ = gzReader.Close()
+	}()
 
 	tarReader := tar.NewReader(gzReader)
 	for {
@@ -272,7 +284,9 @@ func extractBinaryFromZip(archivePath string, binaryName string) ([]byte, error)
 	if err != nil {
 		return nil, err
 	}
-	defer reader.Close()
+	defer func() {
+		_ = reader.Close()
+	}()
 
 	for _, file := range reader.File {
 		if filepath.Base(file.Name) != binaryName {
@@ -282,7 +296,9 @@ func extractBinaryFromZip(archivePath string, binaryName string) ([]byte, error)
 		if err != nil {
 			return nil, err
 		}
-		defer rc.Close()
+		defer func() {
+			_ = rc.Close()
+		}()
 		return io.ReadAll(rc)
 	}
 	return nil, fmt.Errorf("%s not found in archive", binaryName)

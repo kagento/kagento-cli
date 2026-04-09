@@ -131,7 +131,6 @@ func TestSubmitTaskDirBuildsAndPublishesVclusterTask(t *testing.T) {
 
 	const (
 		buildID   = "11111111-1111-1111-1111-111111111111"
-		sourceKey = "sources/test-user/source.tar.gz"
 		testImage = "registry.kagento.io/builds/vcluster-demo@sha256:deadbeef"
 	)
 
@@ -139,21 +138,23 @@ func TestSubmitTaskDirBuildsAndPublishesVclusterTask(t *testing.T) {
 	var publishedBody map[string]any
 	http.DefaultClient = &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
 		switch {
-		case r.Method == http.MethodPost && r.URL.String() == "https://backend.test/api/builds/presign":
-			return jsonHTTPResponse(http.StatusOK, map[string]string{
-				"upload_url": "https://upload.test/upload",
-				"source_key": sourceKey,
-			}), nil
 		case r.Method == http.MethodPost && r.URL.String() == "https://backend.test/api/builds/start":
-			var body map[string]string
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatalf("decode start build body: %v", err)
+			if err := r.ParseMultipartForm(8 << 20); err != nil {
+				t.Fatalf("parse start build multipart form: %v", err)
 			}
-			if body["slug"] != "vcluster-demo" {
-				t.Fatalf("start build slug = %q, want %q", body["slug"], "vcluster-demo")
+			if got := r.FormValue("slug"); got != "vcluster-demo" {
+				t.Fatalf("start build slug = %q, want %q", got, "vcluster-demo")
 			}
-			if body["source_key"] != sourceKey {
-				t.Fatalf("start build source_key = %q, want %q", body["source_key"], sourceKey)
+			file, _, err := r.FormFile("source")
+			if err != nil {
+				t.Fatalf("FormFile(source): %v", err)
+			}
+			defer func() {
+				_ = file.Close()
+			}()
+			uploadedTar, err = io.ReadAll(file)
+			if err != nil {
+				t.Fatalf("ReadAll(source): %v", err)
 			}
 			return jsonHTTPResponse(http.StatusOK, map[string]string{"build_id": buildID}), nil
 		case r.Method == http.MethodGet && r.URL.String() == "https://backend.test/api/builds/"+buildID:
@@ -171,16 +172,6 @@ func TestSubmitTaskDirBuildsAndPublishesVclusterTask(t *testing.T) {
 				"task_id": "task-123",
 				"status":  "draft",
 			}), nil
-		case r.Method == http.MethodPut && r.URL.String() == "https://upload.test/upload":
-			if r.Method != http.MethodPut {
-				t.Fatalf("upload method = %s, want PUT", r.Method)
-			}
-			var err error
-			uploadedTar, err = io.ReadAll(r.Body)
-			if err != nil {
-				t.Fatalf("ReadAll(upload body): %v", err)
-			}
-			return stringHTTPResponse(http.StatusOK, ""), nil
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
 			return nil, nil
@@ -301,7 +292,9 @@ func tarEntryNames(t *testing.T, archive []byte) []string {
 	if err != nil {
 		t.Fatalf("gzip.NewReader(): %v", err)
 	}
-	defer gz.Close()
+	defer func() {
+		_ = gz.Close()
+	}()
 
 	tr := tar.NewReader(gz)
 	var names []string

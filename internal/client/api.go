@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -63,32 +66,9 @@ type ListBuildsOptions struct {
 	Limit  int
 }
 
-// PresignResponse holds the presigned upload URL and source key.
-type PresignResponse struct {
-	UploadURL string `json:"upload_url"`
-	SourceKey string `json:"source_key"`
-}
-
-// PresignBuildUpload requests a presigned S3 URL for uploading a task source tar.
-func (c *Client) PresignBuildUpload() (*PresignResponse, error) {
-	resp, err := c.backendPost("/api/builds/presign", nil)
-	if err != nil {
-		return nil, err
-	}
-	var result PresignResponse
-	if err := json.Unmarshal(resp, &result); err != nil {
-		return nil, fmt.Errorf("parse presign response: %w", err)
-	}
-	return &result, nil
-}
-
-// StartBuild triggers a server-side build after uploading the source tar.
-func (c *Client) StartBuild(slug, sourceKey string) (string, error) {
-	body := map[string]string{
-		"slug":       slug,
-		"source_key": sourceKey,
-	}
-	resp, err := c.backendPost("/api/builds/start", body)
+// StartBuild uploads a source tar and triggers a server-side build.
+func (c *Client) StartBuild(slug, sourcePath string) (string, error) {
+	resp, err := c.doBuildUpload(slug, sourcePath)
 	if err != nil {
 		return "", err
 	}
@@ -193,28 +173,6 @@ func (c *Client) PublishK8sTask(params map[string]interface{}) (map[string]inter
 		return nil, fmt.Errorf("parse publish response: %w", err)
 	}
 	return result, nil
-}
-
-// UploadToPresignedURL uploads data to a presigned S3 URL.
-func UploadToPresignedURL(url string, data io.Reader, contentLength int64) error {
-	req, err := http.NewRequest("PUT", url, data)
-	if err != nil {
-		return fmt.Errorf("create upload request: %w", err)
-	}
-	req.ContentLength = contentLength
-	req.Header.Set("Content-Type", "application/gzip")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("upload failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("upload failed with HTTP %d: %s", resp.StatusCode, string(body))
-	}
-	return nil
 }
 
 // StartSession creates a new session for a task via the backend API.
@@ -365,7 +323,9 @@ func (c *Client) backendPost(path string, body interface{}) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -403,7 +363,9 @@ func (c *Client) backendPatch(path string, body interface{}) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -462,7 +424,9 @@ func (c *Client) BackendGet(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -500,7 +464,76 @@ func (c *Client) BackendPost(path string, body interface{}) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return respBody, nil
+}
+
+func (c *Client) doBuildUpload(slug, sourcePath string) ([]byte, error) {
+	resp, err := c.doWithAuthRetry(func(forceRefresh bool) (*http.Request, error) {
+		file, err := os.Open(sourcePath)
+		if err != nil {
+			return nil, fmt.Errorf("open source archive: %w", err)
+		}
+
+		pr, pw := io.Pipe()
+		writer := multipart.NewWriter(pw)
+		go func() {
+			defer func() {
+				_ = file.Close()
+			}()
+
+			if err := writer.WriteField("slug", slug); err != nil {
+				_ = pw.CloseWithError(err)
+				return
+			}
+
+			part, err := writer.CreateFormFile("source", filepath.Base(sourcePath))
+			if err != nil {
+				_ = pw.CloseWithError(err)
+				return
+			}
+			if _, err := io.Copy(part, file); err != nil {
+				_ = pw.CloseWithError(err)
+				return
+			}
+			if err := writer.Close(); err != nil {
+				_ = pw.CloseWithError(err)
+				return
+			}
+			_ = pw.Close()
+		}()
+
+		req, err := http.NewRequest("POST", c.BackendURL+"/api/builds/start", pr)
+		if err != nil {
+			_ = file.Close()
+			_ = pr.Close()
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		if err := c.setAuthHeader(req, forceRefresh); err != nil {
+			_ = pr.Close()
+			return nil, err
+		}
+		return req, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

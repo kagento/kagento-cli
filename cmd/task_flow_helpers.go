@@ -620,7 +620,9 @@ func startTaskBuild(dir string, cfg *TaskConfig, stream bool) (*client.BuildStat
 	if err != nil {
 		return nil, fmt.Errorf("create archive: %w", err)
 	}
-	defer os.Remove(tarPath)
+	defer func() {
+		_ = os.Remove(tarPath)
+	}()
 
 	tarInfo, err := os.Stat(tarPath)
 	if err != nil {
@@ -685,13 +687,19 @@ func createSourceTar(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer tmpFile.Close()
+	defer func() {
+		_ = tmpFile.Close()
+	}()
 
 	gw := gzip.NewWriter(tmpFile)
-	defer gw.Close()
+	defer func() {
+		_ = gw.Close()
+	}()
 
 	tw := tar.NewWriter(gw)
-	defer tw.Close()
+	defer func() {
+		_ = tw.Close()
+	}()
 
 	dirs := []string{"user", "test", "solution", "provision"}
 	files := []string{"task.yaml"}
@@ -699,7 +707,7 @@ func createSourceTar(dir string) (string, error) {
 	for _, f := range files {
 		srcPath := filepath.Join(dir, f)
 		if err := addFileToTar(tw, srcPath, f); err != nil {
-			os.Remove(tmpFile.Name())
+			_ = os.Remove(tmpFile.Name())
 			return "", fmt.Errorf("add %s: %w", f, err)
 		}
 	}
@@ -736,13 +744,15 @@ func createSourceTar(dir string) (string, error) {
 			if err != nil {
 				return err
 			}
-			defer f.Close()
+			defer func() {
+				_ = f.Close()
+			}()
 
 			_, err = io.Copy(tw, f)
 			return err
 		})
 		if err != nil {
-			os.Remove(tmpFile.Name())
+			_ = os.Remove(tmpFile.Name())
 			return "", err
 		}
 	}
@@ -768,7 +778,9 @@ func addFileToTar(tw *tar.Writer, srcPath, tarName string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	_, err = io.Copy(tw, f)
 	return err

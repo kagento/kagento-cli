@@ -38,20 +38,18 @@ func runTaskRun(cmd *cobra.Command, args []string) {
 
 	slug := cfg.Slug
 	containerName := slug + "-run"
-	volumeName := slug + "-run-vol"
+	workspaceDir, cleanupWorkspace, err := prepareLocalWorkspace(slug, cfg.TaskInstructions)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error preparing workspace: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Clean up on exit.
 	defer func() {
 		fmt.Println("\nCleaning up...")
 		_ = exec.Command("docker", "rm", "-f", containerName).Run()
-		_ = exec.Command("docker", "volume", "rm", volumeName).Run()
+		cleanupWorkspace()
 	}()
-
-	// Create volume.
-	if err := exec.Command("docker", "volume", "create", volumeName).Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating volume: %v\n", err)
-		os.Exit(1)
-	}
 
 	// Run user container interactively.
 	fmt.Printf("Starting %s — interactive shell\n", slug)
@@ -60,8 +58,8 @@ func runTaskRun(cmd *cobra.Command, args []string) {
 
 	dockerRun := exec.Command("docker", "run", "-it", "--rm",
 		"--name", containerName,
-		"-v", volumeName+":/workspace",
-		slug+":user",
+		"-v", workspaceDir+":/workspace",
+		slug+":task",
 		"/bin/bash",
 	)
 	dockerRun.Stdin = os.Stdin
@@ -69,16 +67,16 @@ func runTaskRun(cmd *cobra.Command, args []string) {
 	dockerRun.Stderr = os.Stderr
 
 	if err := dockerRun.Run(); err != nil {
-		// Normal exit from shell is fine.
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 0 {
-			// noop
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 0 {
+			fmt.Fprintf(os.Stderr, "Error running task container: %v\n", err)
+			os.Exit(1)
 		}
 	}
 
 	// Ask if they want to run tests.
 	fmt.Print("\nRun tests against your solution? [Y/n] ")
 	var answer string
-	fmt.Scanln(&answer)
+	_, _ = fmt.Scanln(&answer)
 	if answer != "" && answer != "y" && answer != "Y" {
 		return
 	}
@@ -87,7 +85,7 @@ func runTaskRun(cmd *cobra.Command, args []string) {
 	fmt.Println("Running tests...")
 	out, err := exec.Command("docker", "run", "--rm",
 		"--network", "none",
-		"-v", volumeName+":/workspace:ro",
+		"-v", workspaceDir+":/workspace:ro",
 		slug+":test",
 	).Output()
 	if err != nil {

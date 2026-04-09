@@ -70,7 +70,7 @@ func runLogin(cmd *cobra.Command, args []string) {
 
 			if errMsg != "" {
 				w.Header().Set("Content-Type", "text/html")
-				fmt.Fprintf(w, "<html><body><h2>Login failed</h2><p>%s: %s</p><p>You can close this tab.</p></body></html>", errMsg, errDesc)
+				_, _ = fmt.Fprintf(w, "<html><body><h2>Login failed</h2><p>%s: %s</p><p>You can close this tab.</p></body></html>", errMsg, errDesc)
 				resultCh <- &callbackResult{err: fmt.Errorf("%s: %s", errMsg, errDesc)}
 				return
 			}
@@ -79,7 +79,7 @@ func runLogin(cmd *cobra.Command, args []string) {
 				// Supabase might send tokens in the hash fragment.
 				// Serve a page that extracts them and sends to our server.
 				w.Header().Set("Content-Type", "text/html")
-				fmt.Fprintf(w, `<html><body><script>
+				_, _ = fmt.Fprintf(w, `<html><body><script>
 const hash = window.location.hash.substring(1);
 const params = new URLSearchParams(hash);
 const access_token = params.get('access_token');
@@ -99,13 +99,13 @@ if (access_token) {
 			tokens, err := exchangeCode(supabaseURL, code, redirectURI)
 			if err != nil {
 				w.Header().Set("Content-Type", "text/html")
-				fmt.Fprintf(w, "<html><body><h2>Login failed</h2><p>%v</p><p>You can close this tab.</p></body></html>", err)
+				_, _ = fmt.Fprintf(w, "<html><body><h2>Login failed</h2><p>%v</p><p>You can close this tab.</p></body></html>", err)
 				resultCh <- &callbackResult{err: err}
 				return
 			}
 
 			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprint(w, "<html><body><h2>Logged in!</h2><p>You can close this tab.</p></body></html>")
+			_, _ = fmt.Fprint(w, "<html><body><h2>Logged in!</h2><p>You can close this tab.</p></body></html>")
 			resultCh <- &callbackResult{tokens: tokens}
 		}),
 	}
@@ -119,7 +119,7 @@ if (access_token) {
 			expiresIn := r.URL.Query().Get("expires_in")
 			if accessToken != "" {
 				var expIn int64 = 3600
-				fmt.Sscanf(expiresIn, "%d", &expIn)
+				_, _ = fmt.Sscanf(expiresIn, "%d", &expIn)
 				resultCh <- &callbackResult{tokens: &tokenResult{
 					AccessToken:  accessToken,
 					RefreshToken: refreshToken,
@@ -202,7 +202,9 @@ func exchangeCode(supabaseURL, code, redirectURI string) (*tokenResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("token exchange failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	var result struct {
 		AccessToken  string `json:"access_token"`

@@ -61,14 +61,14 @@ func runTaskBuilds(cmd *cobra.Command, args []string) {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "BUILD ID\tSLUG\tSTATUS\tPROGRESS\tCREATED")
-	fmt.Fprintln(w, "--------\t----\t------\t--------\t-------")
+	_, _ = fmt.Fprintln(w, "BUILD ID\tSLUG\tSTATUS\tPROGRESS\tCREATED")
+	_, _ = fmt.Fprintln(w, "--------\t----\t------\t--------\t-------")
 	for _, build := range builds {
 		progress := build.Progress
 		if progress == "" {
 			progress = "--"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", build.ID, build.Slug, build.Status, progress, build.CreatedAt)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", build.ID, build.Slug, build.Status, progress, build.CreatedAt)
 	}
-	w.Flush()
+	_ = w.Flush()
 }

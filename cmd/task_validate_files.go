@@ -36,7 +36,9 @@ func validateDockerfile(path, role string) []string {
 	if err != nil {
 		return []string{fmt.Sprintf("%s: cannot read file", prefix)}
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	scanner := bufio.NewScanner(f)
 	var (

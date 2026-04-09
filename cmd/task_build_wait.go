@@ -25,8 +25,8 @@ func waitForBuildCompletion(getter buildStatusGetter, buildID string, pollInterv
 			if isTransientBuildStatusError(err) {
 				msg := err.Error()
 				if msg != reportedTransientError {
-					fmt.Fprintf(stderr, "  Build status check failed temporarily: %v\n", err)
-					fmt.Fprintln(stderr, "  Retrying...")
+					_, _ = fmt.Fprintf(stderr, "  Build status check failed temporarily: %v\n", err)
+					_, _ = fmt.Fprintln(stderr, "  Retrying...")
 					reportedTransientError = msg
 				}
 				time.Sleep(pollInterval)
@@ -37,7 +37,7 @@ func waitForBuildCompletion(getter buildStatusGetter, buildID string, pollInterv
 
 		reportedTransientError = ""
 		if build.Status != lastStatus {
-			fmt.Fprintf(stdout, "  Status: %s\n", build.Status)
+			_, _ = fmt.Fprintf(stdout, "  Status: %s\n", build.Status)
 			lastStatus = build.Status
 		}
 

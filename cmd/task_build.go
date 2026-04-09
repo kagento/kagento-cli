@@ -47,7 +47,7 @@ func runTaskBuild(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	if err := checkImageSizes(cfg.Slug); err != nil {
+	if err := checkImageSizes(dir, cfg.Slug); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
@@ -56,12 +56,24 @@ func runTaskBuild(cmd *cobra.Command, args []string) {
 }
 
 // checkImageSizes inspects built images and warns/errors based on size.
-func checkImageSizes(slug string) error {
+func checkImageSizes(dir, slug string) error {
 	fmt.Println("Checking image sizes...")
 	var hasError bool
 
-	for _, tag := range []string{"task", "test"} {
-		image := fmt.Sprintf("%s:%s", slug, tag)
+	imageSpecs := []struct {
+		tag  string
+		path string
+	}{
+		{tag: "task", path: filepath.Join(dir, "user", "Dockerfile")},
+		{tag: "test", path: filepath.Join(dir, "test", "Dockerfile")},
+	}
+	inspected := 0
+	for _, spec := range imageSpecs {
+		if !fileExists(spec.path) {
+			continue
+		}
+		inspected++
+		image := fmt.Sprintf("%s:%s", slug, spec.tag)
 		out, err := exec.Command("docker", "image", "inspect", "--format", "{{.Size}}", image).Output()
 		if err != nil {
 			return fmt.Errorf("inspect %s: %w", image, err)
@@ -81,6 +93,9 @@ func checkImageSizes(slug string) error {
 			fmt.Printf("  %s: %.0f MB\n", image, sizeMB)
 		}
 	}
+	if inspected == 0 {
+		return fmt.Errorf("no buildable images found in %s", dir)
+	}
 
 	if hasError {
 		return fmt.Errorf("one or more images exceed the 1 GB size limit")
@@ -99,6 +114,7 @@ func ensureBuiltImages(dir string, slug string) error {
 }
 
 func buildTaskImages(dir, slug string) error {
+	built := 0
 	for _, spec := range []struct {
 		context string
 		tag     string
@@ -107,10 +123,18 @@ func buildTaskImages(dir, slug string) error {
 		{"test", slug + ":test"},
 	} {
 		ctx := filepath.Join(dir, spec.context)
+		dockerfile := filepath.Join(ctx, "Dockerfile")
+		if !fileExists(dockerfile) {
+			continue
+		}
+		built++
 		fmt.Printf("  Building %s from %s/Dockerfile...\n", spec.tag, spec.context)
 		if err := dockerRun("build", "-t", spec.tag, ctx); err != nil {
 			return fmt.Errorf("build %s failed (see docker output above): %w", spec.tag, err)
 		}
+	}
+	if built == 0 {
+		return fmt.Errorf("no Dockerfiles found to build in %s", dir)
 	}
 	return nil
 }

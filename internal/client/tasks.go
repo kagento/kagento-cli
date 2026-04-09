@@ -40,7 +40,7 @@ func (c *Client) ListTasks(opts ListTasksOptions) ([]TaskRecord, error) {
 		query.Set("status", opts.Status)
 	}
 
-	path := "/api/catalog/tasks"
+	path := "/api/tasks/catalog"
 	if opts.Mine {
 		path = "/api/tasks"
 	}
@@ -61,7 +61,7 @@ func (c *Client) ListTasks(opts ListTasksOptions) ([]TaskRecord, error) {
 }
 
 func (c *Client) GetTask(slug string) (*TaskRecord, error) {
-	resp, err := c.BackendGet("/api/catalog/tasks/" + url.PathEscape(slug))
+	resp, err := c.BackendGet("/api/tasks/catalog/" + url.PathEscape(slug))
 	if err != nil {
 		return nil, err
 	}

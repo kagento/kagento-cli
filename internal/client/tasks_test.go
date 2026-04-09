@@ -45,7 +45,7 @@ func TestListTasksUsesCatalogAndAuthorRoutes(t *testing.T) {
 	if len(called) != 2 {
 		t.Fatalf("called = %#v, want 2 requests", called)
 	}
-	if !strings.Contains(called[0], "/api/catalog/tasks?limit=5") {
+	if !strings.Contains(called[0], "/api/tasks/catalog?limit=5") {
 		t.Fatalf("public path = %q, want catalog route", called[0])
 	}
 	if !strings.Contains(called[1], "/api/tasks?limit=7&status=draft") {
@@ -78,7 +78,7 @@ func TestGetTaskUsesCatalogRoute(t *testing.T) {
 	if _, err := client.GetTask("repair-the-ledger"); err != nil {
 		t.Fatalf("GetTask() error = %v", err)
 	}
-	if !strings.HasSuffix(called, "/api/catalog/tasks/repair-the-ledger") {
+	if !strings.HasSuffix(called, "/api/tasks/catalog/repair-the-ledger") {
 		t.Fatalf("called = %q, want catalog task route", called)
 	}
 }

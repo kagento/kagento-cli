@@ -26,10 +26,13 @@ func latestBuildForSlug(slug string) (*client.BuildStatus, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(builds) == 0 {
-		return nil, nil
+	for _, build := range builds {
+		if isReusableBuildStatus(build.Status) {
+			candidate := build
+			return &candidate, nil
+		}
 	}
-	return &builds[0], nil
+	return nil, nil
 }
 
 func latestCompletedBuildForSlug(slug string) (*client.BuildStatus, error) {
@@ -44,6 +47,15 @@ func latestCompletedBuildForSlug(slug string) (*client.BuildStatus, error) {
 		}
 	}
 	return nil, nil
+}
+
+func isReusableBuildStatus(status string) bool {
+	switch status {
+	case "queued", "validating", "building", "scanning", "signing", "completed":
+		return true
+	default:
+		return false
+	}
 }
 
 func printBuildSummary(build *client.BuildStatus) {

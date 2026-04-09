@@ -596,7 +596,7 @@ func ensureTaskBuild(dir string, cfg *TaskConfig, resume bool, stream bool) (*cl
 			return nil, false, err
 		}
 		if build != nil {
-			if build.Status == "queued" || build.Status == "validating" || build.Status == "building" || build.Status == "scanning" || build.Status == "signing" {
+			if build.Status != "completed" {
 				if stream {
 					fmt.Printf("Resuming build %s for %s\n", build.ID, cfg.Slug)
 				}

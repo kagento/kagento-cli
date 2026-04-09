@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -119,5 +121,74 @@ func TestIsTransientBuildStatusError(t *testing.T) {
 
 	if isTransientBuildStatusError(fmt.Errorf("HTTP 400: build not found")) {
 		t.Fatal("unexpected transient classification for HTTP 400")
+	}
+}
+
+func TestLatestBuildForSlugSkipsFailedBuilds(t *testing.T) {
+	originalClient := cl
+	originalHTTPClient := http.DefaultClient
+	defer func() {
+		cl = originalClient
+		http.DefaultClient = originalHTTPClient
+	}()
+
+	http.DefaultClient = &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.String(), "https://backend.test/api/builds?") {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		return jsonHTTPResponse(http.StatusOK, []map[string]any{
+			{"id": "failed-build", "slug": "demo", "status": "failed"},
+			{"id": "completed-build", "slug": "demo", "status": "completed"},
+		}), nil
+	})}
+
+	cl = &client.Client{
+		BackendURL:  "https://backend.test",
+		Token:       "test-token",
+		StaticToken: true,
+	}
+
+	build, err := latestBuildForSlug("demo")
+	if err != nil {
+		t.Fatalf("latestBuildForSlug() error = %v", err)
+	}
+	if build == nil {
+		t.Fatal("latestBuildForSlug() returned nil")
+	}
+	if build.ID != "completed-build" {
+		t.Fatalf("build.ID = %q, want completed-build", build.ID)
+	}
+}
+
+func TestLatestBuildForSlugReturnsNilWhenOnlyFailedBuildsRemain(t *testing.T) {
+	originalClient := cl
+	originalHTTPClient := http.DefaultClient
+	defer func() {
+		cl = originalClient
+		http.DefaultClient = originalHTTPClient
+	}()
+
+	http.DefaultClient = &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.String(), "https://backend.test/api/builds?") {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		body, _ := json.Marshal([]map[string]any{
+			{"id": "failed-build", "slug": "demo", "status": "failed"},
+		})
+		return stringHTTPResponse(http.StatusOK, string(body)), nil
+	})}
+
+	cl = &client.Client{
+		BackendURL:  "https://backend.test",
+		Token:       "test-token",
+		StaticToken: true,
+	}
+
+	build, err := latestBuildForSlug("demo")
+	if err != nil {
+		t.Fatalf("latestBuildForSlug() error = %v", err)
+	}
+	if build != nil {
+		t.Fatalf("build = %#v, want nil", build)
 	}
 }

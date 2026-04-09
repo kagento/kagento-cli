@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/kagento/kagento-cli/internal/client"
@@ -52,8 +53,8 @@ func runTaskList(cmd *cobra.Command, args []string) {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "SLUG\tTITLE\tSTATUS\tDIFFICULTY\tTYPE\tCATEGORY")
-	fmt.Fprintln(w, "----\t-----\t------\t----------\t----\t--------")
+	fmt.Fprintln(w, "SLUG\tTITLE\tSTATUS\tDIFFICULTY\tTYPE\tTAGS")
+	fmt.Fprintln(w, "----\t-----\t------\t----------\t----\t----")
 	for _, t := range tasks {
 		status := t.Status
 		if status == "" {
@@ -67,12 +68,12 @@ func runTaskList(cmd *cobra.Command, args []string) {
 		if envType == "" {
 			envType = "--"
 		}
-		category := t.Category
-		if category == "" {
-			category = "--"
+		tags := "--"
+		if len(t.Tags) > 0 {
+			tags = strings.Join(t.Tags, ",")
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			t.Slug, t.Title, status, difficulty, envType, category,
+			t.Slug, t.Title, status, difficulty, envType, tags,
 		)
 	}
 	w.Flush()

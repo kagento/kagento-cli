@@ -21,7 +21,7 @@ type TaskRecord struct {
 	TaskInstructions string          `json:"task_instructions,omitempty"`
 	ScoringType      string          `json:"scoring_type,omitempty"`
 	ScoringConfig    json.RawMessage `json:"scoring_config,omitempty"`
-	Category         string          `json:"category,omitempty"`
+	Tags             []string        `json:"tags,omitempty"`
 	ReviewFeedback   string          `json:"review_feedback,omitempty"`
 	CreatedAt        string          `json:"created_at,omitempty"`
 }
@@ -37,7 +37,7 @@ func (c *Client) ListTasks(opts ListTasksOptions) ([]TaskRecord, error) {
 	columns := []string{
 		"id", "slug", "title", "short_desc", "description", "difficulty",
 		"status", "size", "time_limit_sec", "environment_type",
-		"task_instructions", "scoring_type", "scoring_config", "category",
+		"task_instructions", "scoring_type", "scoring_config", "tags",
 		"review_feedback", "created_at",
 	}
 	query.Set("select", strings.Join(columns, ","))
@@ -75,7 +75,7 @@ func (c *Client) ListTasks(opts ListTasksOptions) ([]TaskRecord, error) {
 func (c *Client) GetTask(slug string) (*TaskRecord, error) {
 	query := url.Values{}
 	query.Set("slug", "eq."+slug)
-	query.Set("select", "id,slug,title,short_desc,description,difficulty,status,size,time_limit_sec,environment_type,task_instructions,scoring_type,scoring_config,category,review_feedback,created_at")
+	query.Set("select", "id,slug,title,short_desc,description,difficulty,status,size,time_limit_sec,environment_type,task_instructions,scoring_type,scoring_config,tags,review_feedback,created_at")
 	query.Set("limit", "1")
 
 	resp, err := c.SupabaseGet("/rest/v1/tasks?" + query.Encode())

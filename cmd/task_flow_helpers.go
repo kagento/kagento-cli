@@ -254,8 +254,8 @@ func publishVclusterTask(dir string, cfg *TaskConfig, testImage string, draft bo
 	if cfg.ScoringConfig != nil {
 		body["scoring_config"] = cfg.ScoringConfig
 	}
-	if cfg.Category != "" {
-		body["category"] = cfg.Category
+	if len(cfg.Tags) > 0 {
+		body["tags"] = cfg.Tags
 	}
 
 	result, err := cl.PublishK8sTask(body)
@@ -578,8 +578,8 @@ func publishContainerBuild(buildID string, cfg *TaskConfig, draft bool) (string,
 	if cfg.ScoringConfig != nil {
 		body["scoring_config"] = cfg.ScoringConfig
 	}
-	if cfg.Category != "" {
-		body["category"] = cfg.Category
+	if len(cfg.Tags) > 0 {
+		body["tags"] = cfg.Tags
 	}
 
 	result, err := cl.PublishBuild(buildID, body)
@@ -628,34 +628,15 @@ func startTaskBuild(dir string, cfg *TaskConfig, stream bool) (*client.BuildStat
 	}
 	if stream {
 		fmt.Printf("  Archive size: %.1f KB\n", float64(tarInfo.Size())/1024)
-		fmt.Println("Requesting upload URL...")
-	}
-	presign, err := cl.PresignBuildUpload()
-	if err != nil {
-		return nil, err
-	}
-
-	if stream {
 		fmt.Println("Uploading source archive...")
 	}
-	tarFile, err := os.Open(tarPath)
+	buildID, err := cl.StartBuild(cfg.Slug, tarPath)
 	if err != nil {
-		return nil, err
-	}
-	defer tarFile.Close()
-
-	if err := client.UploadToPresignedURL(presign.UploadURL, tarFile, tarInfo.Size()); err != nil {
 		return nil, err
 	}
 	if stream {
 		fmt.Println("  Upload complete.")
 		fmt.Println("Starting build...")
-	}
-	buildID, err := cl.StartBuild(cfg.Slug, presign.SourceKey)
-	if err != nil {
-		return nil, err
-	}
-	if stream {
 		fmt.Printf("  Build ID: %s\n", buildID)
 		fmt.Println("Waiting for build to complete...")
 	}

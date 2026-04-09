@@ -19,7 +19,7 @@ var (
 	taskUpdateTimeLimitSec     int
 	taskUpdateTaskInstructions string
 	taskUpdateScoringType      string
-	taskUpdateCategory         string
+	taskUpdateTags             []string
 	taskUpdateJSON             bool
 )
 
@@ -41,7 +41,7 @@ func init() {
 	taskUpdateCmd.Flags().IntVar(&taskUpdateTimeLimitSec, "time-limit-sec", 0, "Override time limit seconds")
 	taskUpdateCmd.Flags().StringVar(&taskUpdateTaskInstructions, "task-instructions", "", "Override private task instructions")
 	taskUpdateCmd.Flags().StringVar(&taskUpdateScoringType, "scoring-type", "", "Override scoring type")
-	taskUpdateCmd.Flags().StringVar(&taskUpdateCategory, "category", "", "Override category")
+	taskUpdateCmd.Flags().StringSliceVar(&taskUpdateTags, "tags", nil, "Override tags (comma-separated)")
 	taskUpdateCmd.Flags().BoolVar(&taskUpdateJSON, "json", false, "Output JSON")
 	taskCmd.AddCommand(taskUpdateCmd)
 }
@@ -76,7 +76,7 @@ func runTaskUpdate(cmd *cobra.Command, args []string) {
 		payload["time_limit_sec"] = cfg.TimeLimitSec
 		payload["scoring_type"] = cfg.ScoringType
 		payload["scoring_config"] = cfg.ScoringConfig
-		payload["category"] = cfg.Category
+		payload["tags"] = cfg.Tags
 	}
 
 	overrideString := func(key, value string) {
@@ -93,7 +93,9 @@ func runTaskUpdate(cmd *cobra.Command, args []string) {
 	overrideString("size", taskUpdateSize)
 	overrideString("task_instructions", taskUpdateTaskInstructions)
 	overrideString("scoring_type", taskUpdateScoringType)
-	overrideString("category", taskUpdateCategory)
+	if taskUpdateTags != nil {
+		payload["tags"] = taskUpdateTags
+	}
 	if taskUpdateTimeLimitSec > 0 {
 		payload["time_limit_sec"] = taskUpdateTimeLimitSec
 	}

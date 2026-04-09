@@ -22,7 +22,7 @@ type TaskConfig struct {
 	TimeLimitSec     int                    `yaml:"time_limit_sec"`
 	ScoringType      string                 `yaml:"scoring_type"`
 	ScoringConfig    map[string]interface{} `yaml:"scoring_config"`
-	Category         string                 `yaml:"category"`
+	Tags             []string               `yaml:"tags"`
 	EnvironmentType  string                 `yaml:"environment_type"`
 	Provision        struct {
 		Manifests []string `yaml:"manifests"`
@@ -72,6 +72,10 @@ func runTaskValidate(cmd *cobra.Command, args []string) {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
+		if err := checkImageSizes(dir, cfg.Slug); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
 		fmt.Println("Images built successfully.")
 	}
 }
@@ -92,8 +96,8 @@ func loadAndValidateTask(dir string) (*TaskConfig, error) {
 	if cfg.Version != 1 {
 		errs = append(errs, "version must be 1")
 	}
-	if cfg.Slug == "" {
-		errs = append(errs, "slug is required")
+	if err := validateTaskSlugValue(cfg.Slug); err != nil {
+		errs = append(errs, err.Error())
 	}
 	if cfg.Title == "" {
 		errs = append(errs, "title is required")

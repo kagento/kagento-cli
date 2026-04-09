@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/kagento/kagento-cli/internal/client"
 	"github.com/spf13/cobra"
@@ -65,8 +66,8 @@ func runTaskGet(cmd *cobra.Command, args []string) {
 	if task.TimeLimitSec > 0 {
 		fmt.Printf("Time Limit:      %ds\n", task.TimeLimitSec)
 	}
-	if task.Category != "" {
-		fmt.Printf("Category:        %s\n", task.Category)
+	if len(task.Tags) > 0 {
+		fmt.Printf("Tags:            %s\n", strings.Join(task.Tags, ", "))
 	}
 	if task.ScoringType != "" {
 		fmt.Printf("Scoring Type:    %s\n", task.ScoringType)

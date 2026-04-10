@@ -66,6 +66,13 @@ type ListBuildsOptions struct {
 	Limit  int
 }
 
+type RegistryCredentials struct {
+	ExpiresIn int    `json:"expires_in"`
+	Password  string `json:"password"`
+	Registry  string `json:"registry"`
+	Username  string `json:"username"`
+}
+
 // StartBuild uploads a source tar and triggers a server-side build.
 func (c *Client) StartBuild(slug, sourcePath string) (string, error) {
 	resp, err := c.doBuildUpload(slug, sourcePath)
@@ -407,6 +414,24 @@ func (c *Client) GetKubeconfig(sessionID string) ([]byte, error) {
 		kc = strings.ReplaceAll(kc, "\\n", "\n")
 	}
 	return []byte(kc), nil
+}
+
+func (c *Client) GetSessionRegistryCredentials(sessionID string) (*RegistryCredentials, error) {
+	resp, err := c.BackendPost("/api/registry/token", map[string]string{
+		"scope":      "session",
+		"session_id": sessionID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var result RegistryCredentials
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("parse registry credentials: %w", err)
+	}
+	if strings.TrimSpace(result.Registry) == "" || strings.TrimSpace(result.Username) == "" || strings.TrimSpace(result.Password) == "" {
+		return nil, fmt.Errorf("registry credentials response was incomplete")
+	}
+	return &result, nil
 }
 
 // BackendGet sends a GET request to the backend API.

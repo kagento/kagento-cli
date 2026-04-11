@@ -251,6 +251,10 @@ data:
 }
 
 func TestSubmitTaskDirUploadsGitTaskTemplate(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git CLI not available")
+	}
+
 	originalClient := cl
 	originalHTTPClient := http.DefaultClient
 	defer func() {
@@ -312,10 +316,19 @@ short_desc: Demo git task
 environment_type: git
 scoring_type: gradient
 `)+"\n")
-	writeTaskTestFile(t, filepath.Join(dir, "template", "README.md"), "# Git Demo\n")
-	writeTaskTestFile(t, filepath.Join(dir, "template", "main.py"), "print('hi')\n")
 	writeTaskTestFile(t, filepath.Join(dir, "test", "Dockerfile"), "FROM python:3.12-slim\nCMD [\"python3\", \"-V\"]\n")
 	writeTaskTestFile(t, filepath.Join(dir, "solution", "solve.sh"), "#!/bin/sh\necho solved\n")
+	templateDir := filepath.Join(dir, "template")
+	if err := os.MkdirAll(templateDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(template): %v", err)
+	}
+	writeTaskTestFile(t, filepath.Join(templateDir, "README.md"), "# Git Demo\n")
+	writeTaskTestFile(t, filepath.Join(templateDir, "main.py"), "print('hi')\n")
+	runGitTestCmd(t, templateDir, "init", "-b", "main")
+	runGitTestCmd(t, templateDir, "config", "user.name", "Test Author")
+	runGitTestCmd(t, templateDir, "config", "user.email", "author@example.com")
+	runGitTestCmd(t, templateDir, "add", "README.md", "main.py")
+	runGitTestCmd(t, templateDir, "-c", "commit.gpgsign=false", "commit", "-m", "initial")
 
 	result := submitTaskDir(dir, submitTaskOptions{})
 	if result.Error != "" {
@@ -333,6 +346,9 @@ scoring_type: gradient
 		if !slices.Contains(entries, required) {
 			t.Fatalf("archive entries = %#v, missing %q", entries, required)
 		}
+	}
+	if !slices.Contains(entries, "template/.git/HEAD") {
+		t.Fatalf("archive entries = %#v, missing git metadata", entries)
 	}
 	for _, forbidden := range []string{"user/Dockerfile"} {
 		if slices.Contains(entries, forbidden) {
@@ -363,7 +379,7 @@ environment_type: git
 	}
 }
 
-func TestLoadAndValidateTaskRejectsGitTaskWithEmptyTemplate(t *testing.T) {
+func TestLoadAndValidateTaskRejectsGitTaskWithoutRepoTemplate(t *testing.T) {
 	dir := t.TempDir()
 	writeTaskTestFile(t, filepath.Join(dir, "task.yaml"), strings.TrimSpace(`
 version: 1
@@ -372,17 +388,82 @@ title: Git Empty
 short_desc: Demo git task
 environment_type: git
 `)+"\n")
-	if err := os.MkdirAll(filepath.Join(dir, "template"), 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
+	writeTaskTestFile(t, filepath.Join(dir, "template", "README.md"), "# plain directory\n")
 	writeTaskTestFile(t, filepath.Join(dir, "test", "Dockerfile"), "FROM python:3.12-slim\nCMD [\"python3\", \"-V\"]\n")
 
 	_, err := loadAndValidateTask(dir)
 	if err == nil {
 		t.Fatal("loadAndValidateTask() expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "template/ directory must contain at least one file") {
-		t.Fatalf("error = %q, want empty template rejection", err.Error())
+	if !strings.Contains(err.Error(), "template/ must be a real git repository") {
+		t.Fatalf("error = %q, want real git repository rejection", err.Error())
+	}
+}
+
+func TestLoadAndValidateTaskAcceptsCleanRepoBackedTemplate(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git CLI not available")
+	}
+
+	dir := t.TempDir()
+	writeTaskTestFile(t, filepath.Join(dir, "task.yaml"), strings.TrimSpace(`
+version: 1
+slug: git-history
+title: Git History
+short_desc: Demo git task
+environment_type: git
+`)+"\n")
+	writeTaskTestFile(t, filepath.Join(dir, "test", "Dockerfile"), "FROM python:3.12-slim\nCMD [\"python3\", \"-V\"]\n")
+
+	templateDir := filepath.Join(dir, "template")
+	if err := os.MkdirAll(templateDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(template): %v", err)
+	}
+	writeTaskTestFile(t, filepath.Join(templateDir, "README.md"), "# Repo-backed\n")
+	runGitTestCmd(t, templateDir, "init", "-b", "main")
+	runGitTestCmd(t, templateDir, "config", "user.name", "Test Author")
+	runGitTestCmd(t, templateDir, "config", "user.email", "author@example.com")
+	runGitTestCmd(t, templateDir, "add", "README.md")
+	runGitTestCmd(t, templateDir, "commit", "-m", "initial")
+
+	if _, err := loadAndValidateTask(dir); err != nil {
+		t.Fatalf("loadAndValidateTask() error = %v", err)
+	}
+}
+
+func TestLoadAndValidateTaskRejectsDirtyRepoBackedTemplate(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git CLI not available")
+	}
+
+	dir := t.TempDir()
+	writeTaskTestFile(t, filepath.Join(dir, "task.yaml"), strings.TrimSpace(`
+version: 1
+slug: git-dirty
+title: Git Dirty
+short_desc: Demo git task
+environment_type: git
+`)+"\n")
+	writeTaskTestFile(t, filepath.Join(dir, "test", "Dockerfile"), "FROM python:3.12-slim\nCMD [\"python3\", \"-V\"]\n")
+
+	templateDir := filepath.Join(dir, "template")
+	if err := os.MkdirAll(templateDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(template): %v", err)
+	}
+	writeTaskTestFile(t, filepath.Join(templateDir, "README.md"), "# Repo-backed\n")
+	runGitTestCmd(t, templateDir, "init", "-b", "main")
+	runGitTestCmd(t, templateDir, "config", "user.name", "Test Author")
+	runGitTestCmd(t, templateDir, "config", "user.email", "author@example.com")
+	runGitTestCmd(t, templateDir, "add", "README.md")
+	runGitTestCmd(t, templateDir, "commit", "-m", "initial")
+	writeTaskTestFile(t, filepath.Join(templateDir, "UNTRACKED.txt"), "dirty\n")
+
+	_, err := loadAndValidateTask(dir)
+	if err == nil {
+		t.Fatal("loadAndValidateTask() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "git task template must be clean") {
+		t.Fatalf("error = %q, want dirty repo rejection", err.Error())
 	}
 }
 
@@ -418,6 +499,15 @@ func writeTaskTestFile(t *testing.T, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile(%s): %v", path, err)
+	}
+}
+
+func runGitTestCmd(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
 	}
 }
 

@@ -3,7 +3,9 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -164,6 +166,11 @@ func writeFile(path, content string) {
 }
 
 func scaffoldGitTask(dir, slug string) {
+	if _, err := exec.LookPath("git"); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: git CLI is required to scaffold git tasks: %v\n", err)
+		os.Exit(1)
+	}
+
 	for _, sub := range []string{"solution", "template", "test"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
 			fmt.Fprintf(os.Stderr, "Error creating directory: %v\n", err)
@@ -186,6 +193,9 @@ task_instructions: |
 
   TODO: Describe the task. Contestants will clone the template repo, commit
   changes, and push. The test image runs against the pushed repo state.
+
+  Kagento preserves the branches and history from template/'s git repository.
+  Add extra commits or branches there before publishing if the task needs them.
 
   ## Scoring
 
@@ -272,13 +282,46 @@ ENTRYPOINT ["python3", "/test/run_tests.py"]
 		fmt.Fprintf(os.Stderr, "Error setting solve.sh permissions: %v\n", err)
 		os.Exit(1)
 	}
+	if err := initTaskTemplateRepo(filepath.Join(dir, "template")); err != nil {
+		_ = os.RemoveAll(dir)
+		fmt.Fprintf(os.Stderr, "Error initializing template git repository: %v\n", err)
+		os.Exit(1)
+	}
 
 	fmt.Printf("Created git task scaffold at %s/\n", dir)
 	fmt.Println("  task.yaml             — task metadata (environment_type: git)")
-	fmt.Println("  template/             — initial repo contents pushed to Gitea")
+	fmt.Println("  template/             — initial git repository pushed to Gitea")
 	fmt.Println("  template/README.md    — boilerplate README for contestants")
 	fmt.Println("  template/main.py      — stub file contestants edit")
 	fmt.Println("  test/Dockerfile       — scoring image")
 	fmt.Println("  test/run_tests.py     — test script (COPYed into image)")
 	fmt.Println("  solution/solve.sh     — reference solution script (used by 'kagento task test')")
+}
+
+func initTaskTemplateRepo(templateDir string) error {
+	if err := runGitInitCommand(templateDir, "init", "-b", "main"); err != nil {
+		return err
+	}
+	if err := runGitInitCommand(templateDir, "config", "user.name", "Kagento"); err != nil {
+		return err
+	}
+	if err := runGitInitCommand(templateDir, "config", "user.email", "kagento@local"); err != nil {
+		return err
+	}
+	if err := runGitInitCommand(templateDir, "add", "."); err != nil {
+		return err
+	}
+	if err := runGitInitCommand(templateDir, "-c", "commit.gpgsign=false", "commit", "-m", "Initial task template"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func runGitInitCommand(dir string, args ...string) error {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }

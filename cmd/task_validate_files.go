@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -187,13 +188,18 @@ func validateGitTask(dir string, cfg *TaskConfig) []string {
 		errs = append(errs, "git task must not declare provision.manifests in task.yaml")
 	}
 
-	// template/ directory is required and must be a non-empty directory.
+	// template/ directory is required and must be a real git repository.
 	templateDir := filepath.Join(dir, "template")
 	info, err := os.Stat(templateDir)
 	if err != nil || !info.IsDir() {
-		errs = append(errs, "git task requires a non-empty template/ directory")
+		errs = append(errs, "git task requires a template/ directory")
 		return errs
 	}
+	if !fileExists(filepath.Join(templateDir, ".git")) {
+		errs = append(errs, "git task template/ must be a real git repository")
+		return errs
+	}
+	errs = append(errs, validateGitTemplateRepo(templateDir)...)
 
 	const (
 		gitTemplateMaxFileSize = 1 << 20 // 1 MB per file
@@ -205,12 +211,26 @@ func validateGitTask(dir string, cfg *TaskConfig) []string {
 		if err != nil {
 			return err
 		}
+		rel, relErr := filepath.Rel(templateDir, path)
+		if relErr != nil {
+			return relErr
+		}
+		if rel == "." {
+			return nil
+		}
+		if info.IsDir() {
+			switch {
+			case info.Name() == ".git":
+				return filepath.SkipDir
+			default:
+				return nil
+			}
+		}
 		if info.IsDir() {
 			return nil
 		}
 		fileCount++
 		if info.Size() > gitTemplateMaxFileSize {
-			rel, _ := filepath.Rel(templateDir, path)
 			errs = append(errs, fmt.Sprintf("template/%s: %.1f MB exceeds 1 MB limit", filepath.ToSlash(rel), float64(info.Size())/(1024*1024)))
 		}
 		return nil
@@ -237,6 +257,46 @@ func validateGitTask(dir string, cfg *TaskConfig) []string {
 	}
 
 	return errs
+}
+
+func validateGitTemplateRepo(templateDir string) []string {
+	var errs []string
+
+	if _, err := execLookPath("git"); err != nil {
+		return []string{"git task templates require the git CLI to be installed for validation"}
+	}
+
+	if err := runGitValidation(templateDir, "rev-parse", "--is-inside-work-tree"); err != nil {
+		errs = append(errs, fmt.Sprintf("template/.git is present but not a valid git repository: %v", err))
+		return errs
+	}
+	if err := runGitValidation(templateDir, "rev-parse", "--verify", "refs/heads/main"); err != nil {
+		errs = append(errs, "git task template must contain a local main branch")
+	}
+	status, err := gitOutput(templateDir, "status", "--porcelain", "--untracked-files=all")
+	if err != nil {
+		errs = append(errs, fmt.Sprintf("failed to inspect template git status: %v", err))
+		return errs
+	}
+	if strings.TrimSpace(status) != "" {
+		errs = append(errs, "git task template must be clean (commit or remove untracked changes before publishing)")
+	}
+
+	return errs
+}
+
+func runGitValidation(dir string, args ...string) error {
+	_, err := gitOutput(dir, args...)
+	return err
+}
+
+func gitOutput(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%w (%s)", err, strings.TrimSpace(string(output)))
+	}
+	return string(output), nil
 }
 
 // validateVclusterTask checks provision manifests and optionally validates a

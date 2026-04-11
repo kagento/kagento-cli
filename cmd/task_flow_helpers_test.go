@@ -250,6 +250,142 @@ data:
 	}
 }
 
+func TestSubmitTaskDirUploadsGitTaskTemplate(t *testing.T) {
+	originalClient := cl
+	originalHTTPClient := http.DefaultClient
+	defer func() {
+		cl = originalClient
+		http.DefaultClient = originalHTTPClient
+	}()
+
+	const (
+		buildID = "22222222-2222-2222-2222-222222222222"
+	)
+
+	var uploadedTar []byte
+	http.DefaultClient = &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.String() == "https://backend.test/api/builds/start":
+			if err := r.ParseMultipartForm(8 << 20); err != nil {
+				t.Fatalf("parse start build multipart form: %v", err)
+			}
+			if got := r.FormValue("slug"); got != "git-demo" {
+				t.Fatalf("start build slug = %q, want %q", got, "git-demo")
+			}
+			file, _, err := r.FormFile("source")
+			if err != nil {
+				t.Fatalf("FormFile(source): %v", err)
+			}
+			defer func() {
+				_ = file.Close()
+			}()
+			uploadedTar, err = io.ReadAll(file)
+			if err != nil {
+				t.Fatalf("ReadAll(source): %v", err)
+			}
+			return jsonHTTPResponse(http.StatusOK, map[string]string{"build_id": buildID}), nil
+		case r.Method == http.MethodGet && r.URL.String() == "https://backend.test/api/builds/"+buildID:
+			return jsonHTTPResponse(http.StatusOK, map[string]any{
+				"id":     buildID,
+				"slug":   "git-demo",
+				"status": "completed",
+			}), nil
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+			return nil, nil
+		}
+	})}
+
+	cl = &client.Client{
+		BackendURL:  "https://backend.test",
+		Registry:    "registry.kagento.io",
+		Token:       "test-token",
+		StaticToken: true,
+	}
+
+	dir := t.TempDir()
+	writeTaskTestFile(t, filepath.Join(dir, "task.yaml"), strings.TrimSpace(`
+version: 1
+slug: git-demo
+title: Git Demo
+short_desc: Demo git task
+environment_type: git
+scoring_type: gradient
+`)+"\n")
+	writeTaskTestFile(t, filepath.Join(dir, "template", "README.md"), "# Git Demo\n")
+	writeTaskTestFile(t, filepath.Join(dir, "template", "main.py"), "print('hi')\n")
+	writeTaskTestFile(t, filepath.Join(dir, "test", "Dockerfile"), "FROM python:3.12-slim\nCMD [\"python3\", \"-V\"]\n")
+	writeTaskTestFile(t, filepath.Join(dir, "solution", "solve.sh"), "#!/bin/sh\necho solved\n")
+
+	result := submitTaskDir(dir, submitTaskOptions{})
+	if result.Error != "" {
+		t.Fatalf("submitTaskDir() error = %q", result.Error)
+	}
+	if result.EnvironmentType != "git" {
+		t.Fatalf("environment_type = %q, want %q", result.EnvironmentType, "git")
+	}
+	if result.BuildID != buildID {
+		t.Fatalf("build_id = %q, want %q", result.BuildID, buildID)
+	}
+
+	entries := tarEntryNames(t, uploadedTar)
+	for _, required := range []string{"task.yaml", "template/README.md", "template/main.py", "test/Dockerfile", "solution/solve.sh"} {
+		if !slices.Contains(entries, required) {
+			t.Fatalf("archive entries = %#v, missing %q", entries, required)
+		}
+	}
+	for _, forbidden := range []string{"user/Dockerfile"} {
+		if slices.Contains(entries, forbidden) {
+			t.Fatalf("archive entries = %#v, contains forbidden %q", entries, forbidden)
+		}
+	}
+}
+
+func TestLoadAndValidateTaskRejectsGitTaskWithUserDockerfile(t *testing.T) {
+	dir := t.TempDir()
+	writeTaskTestFile(t, filepath.Join(dir, "task.yaml"), strings.TrimSpace(`
+version: 1
+slug: git-bad
+title: Git Bad
+short_desc: Demo git task
+environment_type: git
+`)+"\n")
+	writeTaskTestFile(t, filepath.Join(dir, "template", "README.md"), "# hi\n")
+	writeTaskTestFile(t, filepath.Join(dir, "test", "Dockerfile"), "FROM python:3.12-slim\nCMD [\"python3\", \"-V\"]\n")
+	writeTaskTestFile(t, filepath.Join(dir, "user", "Dockerfile"), "FROM python:3.12-slim\n")
+
+	_, err := loadAndValidateTask(dir)
+	if err == nil {
+		t.Fatal("loadAndValidateTask() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "must not contain user/Dockerfile") {
+		t.Fatalf("error = %q, want user/Dockerfile rejection", err.Error())
+	}
+}
+
+func TestLoadAndValidateTaskRejectsGitTaskWithEmptyTemplate(t *testing.T) {
+	dir := t.TempDir()
+	writeTaskTestFile(t, filepath.Join(dir, "task.yaml"), strings.TrimSpace(`
+version: 1
+slug: git-empty
+title: Git Empty
+short_desc: Demo git task
+environment_type: git
+`)+"\n")
+	if err := os.MkdirAll(filepath.Join(dir, "template"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	writeTaskTestFile(t, filepath.Join(dir, "test", "Dockerfile"), "FROM python:3.12-slim\nCMD [\"python3\", \"-V\"]\n")
+
+	_, err := loadAndValidateTask(dir)
+	if err == nil {
+		t.Fatal("loadAndValidateTask() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "template/ directory must contain at least one file") {
+		t.Fatalf("error = %q, want empty template rejection", err.Error())
+	}
+}
+
 func TestSubmitTaskDirRejectsVclusterTaskWithoutTestDockerfile(t *testing.T) {
 	dir := t.TempDir()
 	writeTaskTestFile(t, filepath.Join(dir, "task.yaml"), strings.TrimSpace(`

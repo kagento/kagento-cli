@@ -159,6 +159,86 @@ func isAllowedBaseImage(image string) bool {
 	return false
 }
 
+// validateGitTask checks that the task directory has the pieces required for
+// a git-environment task: a populated template/ directory and a test image
+// Dockerfile, but no user/Dockerfile or vcluster provision manifests.
+func validateGitTask(dir string, cfg *TaskConfig) []string {
+	var errs []string
+
+	// test/Dockerfile is required for scoring.
+	testDockerfile := filepath.Join(dir, "test", "Dockerfile")
+	if !fileExists(testDockerfile) {
+		errs = append(errs, "git task requires test/Dockerfile for the scoring image")
+	} else {
+		errs = append(errs, validateDockerfile(testDockerfile, "test")...)
+	}
+
+	// Git tasks must not carry a user image.
+	if fileExists(filepath.Join(dir, "user", "Dockerfile")) {
+		errs = append(errs, "git task must not contain user/Dockerfile — git tasks do not use a user container")
+	}
+
+	// Git tasks must not carry vcluster provision manifests.
+	provisionDir := filepath.Join(dir, "provision", "manifests")
+	if fileExists(provisionDir) {
+		errs = append(errs, "git task must not contain provision/manifests — those are only for vcluster tasks")
+	}
+	if len(cfg.Provision.Manifests) > 0 {
+		errs = append(errs, "git task must not declare provision.manifests in task.yaml")
+	}
+
+	// template/ directory is required and must be a non-empty directory.
+	templateDir := filepath.Join(dir, "template")
+	info, err := os.Stat(templateDir)
+	if err != nil || !info.IsDir() {
+		errs = append(errs, "git task requires a non-empty template/ directory")
+		return errs
+	}
+
+	const (
+		gitTemplateMaxFileSize = 1 << 20 // 1 MB per file
+		gitTemplateMaxFiles    = 100
+	)
+
+	fileCount := 0
+	walkErr := filepath.Walk(templateDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		fileCount++
+		if info.Size() > gitTemplateMaxFileSize {
+			rel, _ := filepath.Rel(templateDir, path)
+			errs = append(errs, fmt.Sprintf("template/%s: %.1f MB exceeds 1 MB limit", filepath.ToSlash(rel), float64(info.Size())/(1024*1024)))
+		}
+		return nil
+	})
+	if walkErr != nil {
+		errs = append(errs, fmt.Sprintf("walk template/: %v", walkErr))
+		return errs
+	}
+
+	if fileCount == 0 {
+		errs = append(errs, "git task template/ directory must contain at least one file")
+	}
+	if fileCount > gitTemplateMaxFiles {
+		errs = append(errs, fmt.Sprintf("template/ has %d files (max %d)", fileCount, gitTemplateMaxFiles))
+	}
+
+	// Validate scoring_type is one of the supported ones when set.
+	if cfg.ScoringType != "" {
+		switch cfg.ScoringType {
+		case "binary", "gradient", "optimization":
+		default:
+			errs = append(errs, fmt.Sprintf("scoring_type %q is not supported for git tasks (use binary, gradient, or optimization)", cfg.ScoringType))
+		}
+	}
+
+	return errs
+}
+
 // validateVclusterTask checks provision manifests and optionally validates a
 // test image Dockerfile. Legacy checks in task.yaml are ignored.
 func validateVclusterTask(dir string, cfg *TaskConfig) []string {

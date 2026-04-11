@@ -116,9 +116,12 @@ func loadAndValidateTask(dir string) (*TaskConfig, error) {
 	}
 
 	// Environment-specific validation.
-	if cfg.EnvironmentType == "vcluster" {
+	switch cfg.EnvironmentType {
+	case "vcluster":
 		errs = append(errs, validateVclusterTask(dir, &cfg)...)
-	} else {
+	case "git":
+		errs = append(errs, validateGitTask(dir, &cfg)...)
+	default:
 		// Container tasks: check Dockerfiles exist.
 		for _, f := range []string{"user/Dockerfile", "test/Dockerfile"} {
 			if _, err := os.Stat(filepath.Join(dir, f)); os.IsNotExist(err) {

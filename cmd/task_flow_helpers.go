@@ -86,6 +86,8 @@ func submitTaskDir(dir string, opts submitTaskOptions) taskActionResult {
 		return result
 	}
 
+	// Git and container tasks share the build→publish flow; the backend
+	// dispatches on environment_type when the build source is extracted.
 	build, reused, err := ensureTaskBuild(dir, cfg, opts.Resume, opts.Stream)
 	if err != nil {
 		result.Error = err.Error()
@@ -701,7 +703,7 @@ func createSourceTar(dir string) (string, error) {
 		_ = tw.Close()
 	}()
 
-	dirs := []string{"user", "test", "solution", "provision"}
+	dirs := []string{"user", "test", "solution", "provision", "template"}
 	files := []string{"task.yaml"}
 
 	for _, f := range files {

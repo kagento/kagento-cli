@@ -110,7 +110,7 @@ func ensureBuiltImages(dir string, slug string) error {
 		fmt.Println("Building images from Dockerfiles...")
 		return buildTaskImages(dir, slug)
 	}
-	return fmt.Errorf("cannot determine task state in %s (need user/Dockerfile+test/Dockerfile)", dir)
+	return fmt.Errorf("cannot determine task state in %s (need test/Dockerfile and either user/Dockerfile or environment_type: git|vcluster)", dir)
 }
 
 func buildTaskImages(dir, slug string) error {

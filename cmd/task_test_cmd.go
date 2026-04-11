@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -61,59 +62,75 @@ func doTaskTest(dir string) error {
 	}
 
 	slug := cfg.Slug
-	containerName := slug + "-test-user"
-	volumeName := slug + "-test-vol"
 
-	// Clean up on exit.
+	workspaceDir, cleanupWorkspace, err := prepareTaskTestWorkspace(dir, cfg)
+	if err != nil {
+		return fmt.Errorf("preparing workspace: %w", err)
+	}
+
+	containerName := slug + "-test-user"
 	defer func() {
 		_ = exec.Command("docker", "rm", "-f", containerName).Run()
-		_ = exec.Command("docker", "volume", "rm", volumeName).Run()
+		cleanupWorkspace()
 	}()
 
-	// Create temp volume.
-	fmt.Println("Creating test volume...")
-	if err := exec.Command("docker", "volume", "create", volumeName).Run(); err != nil {
-		return fmt.Errorf("creating volume: %w", err)
-	}
-
-	// Start user container with the volume mounted at /workspace.
-	fmt.Println("Starting user container...")
-	if err := exec.Command("docker", "run", "-d",
-		"--name", containerName,
-		"-v", volumeName+":/workspace",
-		slug+":user",
-	).Run(); err != nil {
-		return fmt.Errorf("starting user container: %w", err)
-	}
-
-	// Copy solve.sh into the container and execute it.
-	fmt.Println("Running solve.sh inside user container...")
 	absDir, _ := filepath.Abs(dir)
 	absSolvePath := filepath.Join(absDir, "solution", "solve.sh")
 
-	if err := exec.Command("docker", "cp", absSolvePath, containerName+":/tmp/solve.sh").Run(); err != nil {
-		return fmt.Errorf("copying solve.sh into container: %w", err)
-	}
+	if cfg.EnvironmentType == "git" {
+		// Git tasks have no user container; run solve.sh directly on the host
+		// against a fresh template/ checkout. The test image is then run
+		// against that workspace.
+		fmt.Println("Running solve.sh against template workspace...")
+		solveCmd := exec.Command("bash", absSolvePath)
+		solveCmd.Dir = workspaceDir
+		solveCmd.Env = append(os.Environ(), "WORKSPACE="+workspaceDir)
+		solveOut, err := solveCmd.CombinedOutput()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\n--- solve.sh output ---\n%s\n--- end output ---\n\n", string(solveOut))
+			return fmt.Errorf("running solve.sh: %w", err)
+		}
+		if len(solveOut) > 0 {
+			fmt.Print(string(solveOut))
+		}
+	} else {
+		// Start user container with the seeded workspace mounted at /workspace.
+		fmt.Println("Starting user container...")
+		if err := exec.Command("docker", "run", "-d",
+			"--name", containerName,
+			"-v", workspaceDir+":/workspace",
+			slug+":task",
+		).Run(); err != nil {
+			return fmt.Errorf("starting user container: %w", err)
+		}
 
-	solveCmd := exec.Command("docker", "exec", containerName, "bash", "/tmp/solve.sh")
-	solveOut, err := solveCmd.CombinedOutput()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "\n--- solve.sh output ---\n%s\n--- end output ---\n\n", string(solveOut))
-		return fmt.Errorf("running solve.sh: %w", err)
-	}
-	// Show solve.sh output on success too.
-	if len(solveOut) > 0 {
-		fmt.Print(string(solveOut))
-	}
+		// Copy solve.sh into the container and execute it.
+		fmt.Println("Running solve.sh inside user container...")
 
-	// Stop the user container (volume persists).
-	_ = exec.Command("docker", "stop", containerName).Run()
+		if err := exec.Command("docker", "cp", absSolvePath, containerName+":/tmp/solve.sh").Run(); err != nil {
+			return fmt.Errorf("copying solve.sh into container: %w", err)
+		}
+
+		solveCmd := exec.Command("docker", "exec", containerName, "bash", "/tmp/solve.sh")
+		solveOut, err := solveCmd.CombinedOutput()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\n--- solve.sh output ---\n%s\n--- end output ---\n\n", string(solveOut))
+			return fmt.Errorf("running solve.sh: %w", err)
+		}
+		// Show solve.sh output on success too.
+		if len(solveOut) > 0 {
+			fmt.Print(string(solveOut))
+		}
+
+		// Stop the user container (volume persists).
+		_ = exec.Command("docker", "stop", containerName).Run()
+	}
 
 	// Run test image with volume mounted.
 	fmt.Println("Running tests...")
 	testCmd := exec.Command("docker", "run", "--rm",
 		"--network", "none",
-		"-v", volumeName+":/workspace:ro",
+		"-v", workspaceDir+":/workspace:ro",
 		slug+":test",
 	)
 	out, err := testCmd.CombinedOutput()
@@ -130,7 +147,11 @@ func doTaskTest(dir string) error {
 		Error       string          `json:"error,omitempty"`
 		Details     json.RawMessage `json:"details,omitempty"`
 	}
-	if err := json.Unmarshal(out, &result); err != nil {
+	jsonLine := extractLastJSONLine(out)
+	if jsonLine == nil {
+		return fmt.Errorf("parsing test output: no JSON found\nRaw output: %s", string(out))
+	}
+	if err := json.Unmarshal(jsonLine, &result); err != nil {
 		return fmt.Errorf("parsing test output: %w\nRaw output: %s", err, string(out))
 	}
 
@@ -190,6 +211,19 @@ func runTaskTestWatch(dir string) {
 			}
 		}
 	}
+}
+
+func extractLastJSONLine(output []byte) []byte {
+	trimmed := bytes.TrimRight(output, "\n\r ")
+	if len(trimmed) == 0 {
+		return nil
+	}
+	idx := bytes.LastIndexByte(trimmed, '\n')
+	line := bytes.TrimSpace(trimmed[idx+1:])
+	if len(line) > 0 && line[0] == '{' {
+		return line
+	}
+	return nil
 }
 
 // collectMaxMtime walks a directory and returns the most recent modification time.

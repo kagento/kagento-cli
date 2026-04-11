@@ -45,7 +45,7 @@ func runStart(cmd *cobra.Command, args []string) {
 			fmt.Printf("Session name: %s\n", name)
 		}
 		if status == "ready" || status == "running" {
-			downloadAndPrintKubeconfig(sessionID)
+			printSessionReady(sessionID, result)
 			return
 		}
 		fmt.Printf("Status: %s\n", status)
@@ -79,7 +79,7 @@ func runStart(cmd *cobra.Command, args []string) {
 			switch status {
 			case "ready", "running":
 				fmt.Println()
-				downloadAndPrintKubeconfig(sessionID)
+				printSessionReady(sessionID, session)
 				return
 			case "failed":
 				fmt.Fprintln(os.Stderr, "\nError: session failed to start")
@@ -89,6 +89,47 @@ func runStart(cmd *cobra.Command, args []string) {
 			}
 		}
 	}
+}
+
+// printSessionReady dispatches on environment_type and prints env-specific
+// access details: kubeconfig for vcluster, git clone command for git, or
+// SSH instructions for container sessions.
+func printSessionReady(sessionID string, session map[string]interface{}) {
+	envType, _ := session["environment_type"].(string)
+
+	switch envType {
+	case "git":
+		printGitSessionReady(sessionID, session)
+	case "vcluster":
+		downloadAndPrintKubeconfig(sessionID)
+	default:
+		// Container session — print SSH command if available.
+		if cmd, _ := session["ssh_command"].(string); cmd != "" {
+			fmt.Printf("SSH into your session:\n  %s\n", cmd)
+		} else {
+			downloadAndPrintKubeconfig(sessionID)
+		}
+	}
+}
+
+func printGitSessionReady(sessionID string, session map[string]interface{}) {
+	remote, _ := session["git_remote_url"].(string)
+	webURL, _ := session["gitea_web_url"].(string)
+	username, _ := session["gitea_username"].(string)
+
+	fmt.Println("Git session ready.")
+	if remote != "" {
+		fmt.Printf("\nClone your repo:\n  git clone %s\n", remote)
+	}
+	if webURL != "" {
+		fmt.Printf("\nOpen in browser:\n  %s\n", webURL)
+	}
+	if username != "" {
+		fmt.Printf("\nCredentials: load via the session page in the web UI, or fetch with\n")
+		fmt.Printf("  kagento session credentials %s\n", sessionID)
+		fmt.Printf("(username: %s)\n", username)
+	}
+	fmt.Printf("\nEdit, commit, push. When you're done:\n  kagento submit %s\n", sessionID)
 }
 
 func downloadAndPrintKubeconfig(sessionID string) {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -25,7 +26,7 @@ func runTaskRun(cmd *cobra.Command, args []string) {
 		dir = args[0]
 	}
 
-	cfg, err := loadTaskConfig(dir)
+	cfg, err := loadAndValidateTask(dir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -37,8 +38,7 @@ func runTaskRun(cmd *cobra.Command, args []string) {
 	}
 
 	slug := cfg.Slug
-	containerName := slug + "-run"
-	workspaceDir, cleanupWorkspace, err := prepareLocalWorkspace(slug, cfg.TaskInstructions)
+	workspaceDir, cleanupWorkspace, err := prepareTaskTestWorkspace(dir, cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error preparing workspace: %v\n", err)
 		os.Exit(1)
@@ -47,29 +47,44 @@ func runTaskRun(cmd *cobra.Command, args []string) {
 	// Clean up on exit.
 	defer func() {
 		fmt.Println("\nCleaning up...")
-		_ = exec.Command("docker", "rm", "-f", containerName).Run()
 		cleanupWorkspace()
 	}()
 
-	// Run user container interactively.
-	fmt.Printf("Starting %s — interactive shell\n", slug)
-	fmt.Println("Read /workspace/TASK.md for instructions. Exit the shell when done.")
-	fmt.Println()
+	if cfg.EnvironmentType == "git" {
+		fmt.Printf("Starting %s — local git workspace shell\n", slug)
+		fmt.Printf("Workspace: %s\n", workspaceDir)
+		fmt.Println("Read ./TASK.md for instructions. Exit the shell when done.")
+		fmt.Println()
 
-	dockerRun := exec.Command("docker", "run", "-it", "--rm",
-		"--name", containerName,
-		"-v", workspaceDir+":/workspace",
-		slug+":task",
-		"/bin/bash",
-	)
-	dockerRun.Stdin = os.Stdin
-	dockerRun.Stdout = os.Stdout
-	dockerRun.Stderr = os.Stderr
-
-	if err := dockerRun.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 0 {
-			fmt.Fprintf(os.Stderr, "Error running task container: %v\n", err)
+		if err := runGitTaskWorkspaceShell(workspaceDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Error running local git workspace shell: %v\n", err)
 			os.Exit(1)
+		}
+	} else {
+		containerName := slug + "-run"
+		defer func() {
+			_ = exec.Command("docker", "rm", "-f", containerName).Run()
+		}()
+
+		fmt.Printf("Starting %s — interactive shell\n", slug)
+		fmt.Println("Read /workspace/TASK.md for instructions. Exit the shell when done.")
+		fmt.Println()
+
+		dockerRun := exec.Command("docker", "run", "-it", "--rm",
+			"--name", containerName,
+			"-v", workspaceDir+":/workspace",
+			slug+":task",
+			"/bin/bash",
+		)
+		dockerRun.Stdin = os.Stdin
+		dockerRun.Stdout = os.Stdout
+		dockerRun.Stderr = os.Stderr
+
+		if err := dockerRun.Run(); err != nil {
+			if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 0 {
+				fmt.Fprintf(os.Stderr, "Error running task container: %v\n", err)
+				os.Exit(1)
+			}
 		}
 	}
 
@@ -97,4 +112,33 @@ func runTaskRun(cmd *cobra.Command, args []string) {
 	}
 
 	fmt.Println(string(out))
+}
+
+func runGitTaskWorkspaceShell(workspaceDir string) error {
+	shell := resolveInteractiveShell()
+	cmd := exec.Command(shell)
+	cmd.Dir = workspaceDir
+	cmd.Env = append(os.Environ(), "WORKSPACE="+workspaceDir)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func resolveInteractiveShell() string {
+	candidates := []string{
+		strings.TrimSpace(os.Getenv("SHELL")),
+		"/bin/bash",
+		"/bin/zsh",
+		"/bin/sh",
+	}
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return "sh"
 }

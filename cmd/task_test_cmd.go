@@ -45,7 +45,7 @@ func runTaskTest(cmd *cobra.Command, args []string) {
 }
 
 func doTaskTest(dir string) error {
-	cfg, err := loadTaskConfig(dir)
+	cfg, err := loadAndValidateTask(dir)
 	if err != nil {
 		return err
 	}

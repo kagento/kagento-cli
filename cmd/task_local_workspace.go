@@ -1,17 +1,18 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
 // prepareTaskTestWorkspace selects the right workspace seeding strategy for the
 // task's environment type. Container tasks seed from the built user image; git
-// tasks copy the template/ directory as-is.
+// tasks use a fresh local clone checked out on main.
 func prepareTaskTestWorkspace(dir string, cfg *TaskConfig) (string, func(), error) {
 	if cfg.EnvironmentType == "git" {
 		return prepareGitTemplateWorkspace(dir, cfg.TaskInstructions)
@@ -19,36 +20,31 @@ func prepareTaskTestWorkspace(dir string, cfg *TaskConfig) (string, func(), erro
 	return prepareLocalWorkspace(cfg.Slug, cfg.TaskInstructions)
 }
 
-// prepareGitTemplateWorkspace copies template/ into a fresh writable temp
-// directory so solve.sh and the test image run against a clean clone-like
-// state.
+// prepareGitTemplateWorkspace creates a fresh clone of template/ checked out on
+// main so local flows match the repo state contestants get when the task is
+// published.
 func prepareGitTemplateWorkspace(dir, taskInstructions string) (string, func(), error) {
 	templateDir := filepath.Join(dir, "template")
 	info, err := os.Stat(templateDir)
 	if err != nil || !info.IsDir() {
 		return "", nil, fmt.Errorf("template/ directory not found at %s", templateDir)
 	}
+	if _, err := execLookPath("git"); err != nil {
+		return "", nil, fmt.Errorf("git CLI is required to prepare git task workspaces: %w", err)
+	}
 
-	workspaceDir, err := os.MkdirTemp("", "kagento-git-workspace-*")
+	workspaceDir, cleanup, err := createWritableWorkspace("kagento-git-workspace-*")
 	if err != nil {
-		return "", nil, fmt.Errorf("create temp workspace: %w", err)
-	}
-	if err := os.Chmod(workspaceDir, 0o777); err != nil {
-		_ = os.RemoveAll(workspaceDir)
-		return "", nil, fmt.Errorf("chmod temp workspace: %w", err)
+		return "", nil, err
 	}
 
-	cleanup := func() {
-		_ = os.RemoveAll(workspaceDir)
-	}
-
-	if err := copyTreeContents(templateDir, workspaceDir); err != nil {
+	if err := cloneGitWorkspace(templateDir, workspaceDir); err != nil {
 		cleanup()
-		return "", nil, fmt.Errorf("copy template: %w", err)
+		return "", nil, fmt.Errorf("clone template repo: %w", err)
 	}
 
 	if taskInstructions != "" {
-		if err := os.WriteFile(filepath.Join(workspaceDir, "TASK.md"), []byte(taskInstructions), 0o644); err != nil {
+		if err := writeGitWorkspaceTaskInstructions(workspaceDir, taskInstructions); err != nil {
 			cleanup()
 			return "", nil, fmt.Errorf("write TASK.md: %w", err)
 		}
@@ -57,59 +53,90 @@ func prepareGitTemplateWorkspace(dir, taskInstructions string) (string, func(), 
 	return workspaceDir, cleanup, nil
 }
 
-// copyTreeContents copies every file under src into dst, preserving the
-// relative layout. It does not follow symlinks.
-func copyTreeContents(src, dst string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		if rel == "." {
-			return nil
-		}
-		target := filepath.Join(dst, rel)
-		if info.IsDir() {
-			return os.MkdirAll(target, 0o755)
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			// Skip symlinks — template files must be regular.
-			return nil
-		}
-		return copyRegularFile(path, target, info.Mode())
-	})
+func cloneGitWorkspace(templateDir, workspaceDir string) error {
+	if err := runGitWorkspaceCommand("", "clone", "--quiet", "--origin", "origin", templateDir, workspaceDir); err != nil {
+		return err
+	}
+	if err := runGitWorkspaceCommand(workspaceDir, "checkout", "--quiet", "main"); err != nil {
+		return err
+	}
+	if err := runGitWorkspaceCommand(workspaceDir, "reset", "--quiet", "--hard", "origin/main"); err != nil {
+		return err
+	}
+	return nil
 }
 
-func copyRegularFile(src, dst string, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+func writeGitWorkspaceTaskInstructions(workspaceDir, taskInstructions string) error {
+	taskPath := filepath.Join(workspaceDir, "TASK.md")
+	if err := os.WriteFile(taskPath, []byte(taskInstructions), 0o644); err != nil {
 		return err
 	}
-	in, err := os.Open(src)
-	if err != nil {
+
+	excludePath := filepath.Join(workspaceDir, ".git", "info", "exclude")
+	data, err := os.ReadFile(excludePath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	defer func() {
-		_ = in.Close()
-	}()
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode.Perm())
-	if err != nil {
-		return err
+	marker := "\nTASK.md\n"
+	current := "\n" + string(data)
+	if !strings.Contains(current, marker) {
+		f, err := os.OpenFile(excludePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			_ = f.Close()
+		}()
+		if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
+			if _, err := f.WriteString("\n"); err != nil {
+				return err
+			}
+		}
+		if _, err := f.WriteString("TASK.md\n"); err != nil {
+			return err
+		}
 	}
-	defer func() {
-		_ = out.Close()
-	}()
-	_, err = io.Copy(out, in)
-	return err
+	return nil
 }
 
 // prepareLocalWorkspace seeds a writable local workspace from the built task
 // image and injects TASK.md from task_instructions so local CLI flows behave
 // like real sessions.
 func prepareLocalWorkspace(slug, taskInstructions string) (string, func(), error) {
-	workspaceDir, err := os.MkdirTemp("", "kagento-workspace-*")
+	workspaceDir, cleanup, err := createWritableWorkspace("kagento-workspace-*")
+	if err != nil {
+		return "", nil, err
+	}
+
+	seedContainer := fmt.Sprintf("%s-seed-%d", slug, time.Now().UnixNano())
+	cleanupWithContainer := func() {
+		_ = exec.Command("docker", "rm", "-f", seedContainer).Run()
+		cleanup()
+	}
+
+	if err := exec.Command("docker", "create", "--name", seedContainer, slug+":task").Run(); err != nil {
+		cleanupWithContainer()
+		return "", nil, fmt.Errorf("create seed container: %w", err)
+	}
+	if err := exec.Command("docker", "cp", seedContainer+":/workspace/.", workspaceDir).Run(); err != nil {
+		cleanupWithContainer()
+		return "", nil, fmt.Errorf("copy seed workspace: %w", err)
+	}
+
+	if taskInstructions != "" {
+		taskPath := filepath.Join(workspaceDir, "TASK.md")
+		if err := os.WriteFile(taskPath, []byte(taskInstructions), 0o644); err != nil {
+			cleanupWithContainer()
+			return "", nil, fmt.Errorf("write TASK.md: %w", err)
+		}
+	}
+
+	_ = exec.Command("docker", "rm", "-f", seedContainer).Run()
+	return workspaceDir, cleanupWithContainer, nil
+}
+
+func createWritableWorkspace(pattern string) (string, func(), error) {
+	workspaceDir, err := os.MkdirTemp("", pattern)
 	if err != nil {
 		return "", nil, fmt.Errorf("create temp workspace: %w", err)
 	}
@@ -117,30 +144,21 @@ func prepareLocalWorkspace(slug, taskInstructions string) (string, func(), error
 		_ = os.RemoveAll(workspaceDir)
 		return "", nil, fmt.Errorf("chmod temp workspace: %w", err)
 	}
-
-	seedContainer := fmt.Sprintf("%s-seed-%d", slug, time.Now().UnixNano())
 	cleanup := func() {
-		_ = exec.Command("docker", "rm", "-f", seedContainer).Run()
 		_ = os.RemoveAll(workspaceDir)
 	}
-
-	if err := exec.Command("docker", "create", "--name", seedContainer, slug+":task").Run(); err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("create seed container: %w", err)
-	}
-	if err := exec.Command("docker", "cp", seedContainer+":/workspace/.", workspaceDir).Run(); err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("copy seed workspace: %w", err)
-	}
-
-	if taskInstructions != "" {
-		taskPath := filepath.Join(workspaceDir, "TASK.md")
-		if err := os.WriteFile(taskPath, []byte(taskInstructions), 0o644); err != nil {
-			cleanup()
-			return "", nil, fmt.Errorf("write TASK.md: %w", err)
-		}
-	}
-
-	_ = exec.Command("docker", "rm", "-f", seedContainer).Run()
 	return workspaceDir, cleanup, nil
+}
+
+func runGitWorkspaceCommand(dir string, args ...string) error {
+	cmdArgs := args
+	if dir != "" {
+		cmdArgs = append([]string{"-C", dir}, args...)
+	}
+	cmd := exec.Command("git", cmdArgs...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }

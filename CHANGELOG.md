@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.1](https://github.com/kagento/kagento-cli/compare/v1.9.0...v1.9.1) (2026-04-12)
+
+
+### Bug Fixes
+
+* release local git task workspace fixes ([9aa14d5](https://github.com/kagento/kagento-cli/commit/9aa14d5ea24c70a1b660c89eb6d5d77183b98d87))
+
 ## [1.9.0](https://github.com/kagento/kagento-cli/compare/v1.8.0...v1.9.0) (2026-04-11)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/kagento/kagento-cli/compare/v1.8.0...v1.9.0) (2026-04-11)
+
+
+### Features
+
+* replace task category field with tags array ([6daed11](https://github.com/kagento/kagento-cli/commit/6daed11167a7320e9596c85e02133889011763f2))
+
 ## [1.8.0](https://github.com/kagento/kagento-cli/compare/v1.7.1...v1.8.0) (2026-04-06)
 
 
